@@ -1,0 +1,462 @@
+import React, { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import api from '../../api/axios';
+import { ArrowLeft, User, Phone, MapPin, Tv, ShieldCheck, Receipt, DollarSign, AlertCircle, RefreshCw, Printer, FileText } from 'lucide-react';
+import { useAuth } from '../../auth/AuthContext';
+
+const CustomerDetailPage = () => {
+  const { id } = useParams();
+  const { hasRole } = useAuth();
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundData, setRefundData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    remarks: '',
+  });
+  const [refundResult, setRefundResult] = useState(null);
+
+  useEffect(() => {
+    fetchCustomerDetails();
+  }, [id]);
+
+  const fetchCustomerDetails = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/customers/${id}`);
+      setCustomer(res.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefundSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.post('/deposits/refund', {
+        customer_id: customer.id,
+        date: refundData.date,
+        remarks: refundData.remarks,
+      });
+      setRefundResult(res.data);
+      fetchCustomerDetails();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error processing deposit refund');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-cyan-400">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto"></div>
+      </div>
+    );
+  }
+
+  if (!customer) {
+    return <div className="p-8 text-center text-slate-400">Customer not found.</div>;
+  }
+
+  const grossDeposit = customer.current_deposit || 0;
+  const totalDue = customer.total_due || 0;
+
+  // Build Chronological Double-Entry Ledger Statement (Bills = Dr, Payments = Cr)
+  const ledgerEvents = [];
+
+  // 1. Add Bills as Dr (Debit) events
+  (customer.bills || []).forEach((b) => {
+    const rawDate = b.generated_at || b.created_at;
+    const formattedTxDate = rawDate ? new Date(rawDate).toLocaleDateString('en-GB') : b.bill_month;
+    const formattedDueDate = b.due_date ? new Date(b.due_date).toLocaleDateString('en-GB') : b.bill_month;
+    
+    ledgerEvents.push({
+      id: `bill-${b.id}`,
+      txDate: formattedTxDate,
+      docType: 'Bill',
+      docNo: b.bill_month,
+      date: formattedDueDate,
+      notes: `Monthly Cable TV Bill (${b.bill_month})`,
+      dr: parseFloat(b.amount || 0),
+      cr: 0,
+      timestamp: rawDate ? new Date(rawDate).getTime() : new Date(b.bill_month + '-01').getTime(),
+    });
+  });
+
+  // 2. Group Payments by Master Receipt Number as Cr (Credit) events
+  const paymentGroups = new Map();
+  (customer.payments || []).forEach((p) => {
+    const masterReceipt = p.receipt_no ? p.receipt_no.replace(/-\d+$/, '') : `RCPT-${p.id}`;
+    if (!paymentGroups.has(masterReceipt)) {
+      paymentGroups.set(masterReceipt, {
+        id: `pay-group-${masterReceipt}`,
+        docNo: masterReceipt,
+        rawDate: p.payment_date || p.created_at,
+        paymentMethod: p.payment_method,
+        collectorName: p.collector?.name,
+        totalAmount: 0,
+        months: [],
+        isAdvance: !p.bill_id || p.receipt_no?.includes('ADV'),
+      });
+    }
+    const grp = paymentGroups.get(masterReceipt);
+    grp.totalAmount += parseFloat(p.amount_paid || 0);
+
+    const associatedBill = (customer.bills || []).find(b => b.id === p.bill_id);
+    if (associatedBill?.bill_month && !grp.months.includes(associatedBill.bill_month)) {
+      grp.months.push(associatedBill.bill_month);
+    }
+  });
+
+  paymentGroups.forEach((grp) => {
+    const formattedDate = grp.rawDate ? new Date(grp.rawDate).toLocaleDateString('en-GB') : '-';
+    const monthStr = grp.months.length > 0 ? ` (${grp.months.join(', ')})` : '';
+
+    const notesText = grp.isAdvance && grp.months.length === 0
+      ? `Advance Credit Payment via ${grp.paymentMethod?.toUpperCase()}${grp.collectorName ? ' (Collector: ' + grp.collectorName + ')' : ''}`
+      : `Bill Payment${monthStr} via ${grp.paymentMethod?.toUpperCase()}${grp.collectorName ? ' (Collector: ' + grp.collectorName + ')' : ''}`;
+
+    ledgerEvents.push({
+      id: grp.id,
+      txDate: formattedDate,
+      docType: 'Payment',
+      docNo: grp.docNo,
+      date: formattedDate,
+      notes: notesText,
+      dr: 0,
+      cr: grp.totalAmount,
+      timestamp: grp.rawDate ? new Date(grp.rawDate).getTime() : 0,
+    });
+  });
+
+  // Sort chronologically (oldest to newest)
+  ledgerEvents.sort((a, b) => a.timestamp - b.timestamp);
+
+  // Compute running balance per row
+  let runningBalance = 0;
+  let totalDr = 0;
+  let totalCr = 0;
+
+  const statementRows = ledgerEvents.map((ev) => {
+    runningBalance += ev.dr - ev.cr;
+    totalDr += ev.dr;
+    totalCr += ev.cr;
+    return {
+      ...ev,
+      balance: runningBalance,
+    };
+  });
+
+  const connectionDateFormatted = customer.connection_date
+    ? new Date(customer.connection_date).toLocaleDateString('en-GB')
+    : '-';
+
+  return (
+    <div className="space-y-6">
+      {/* Top Navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
+        <div className="flex items-center gap-3">
+          <Link
+            to="/customers"
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-slate-100">{customer.name}</h2>
+              <span className="font-mono text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                {customer.customer_code}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">{customer.area?.name} Zone</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.print()}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Printer className="w-4 h-4 text-cyan-400" />
+            Print Statement
+          </button>
+
+          {hasRole('super_admin', 'accounts') && customer.status !== 'disconnected' && (
+            <button
+              onClick={() => setShowRefundModal(true)}
+              className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Disconnect & Refund
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Customer Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-1">
+          <div className="text-xs text-slate-400">Connection Info</div>
+          <div className="text-sm font-bold text-slate-100 uppercase">{customer.connection_type}</div>
+          {customer.stb_serial && (
+            <div className="text-xs text-slate-400 font-mono">STB: {customer.stb_serial}</div>
+          )}
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-1">
+          <div className="text-xs text-slate-400">Monthly Rent</div>
+          <div className="text-lg font-bold text-slate-100">৳{parseFloat(customer.monthly_rent).toFixed(2)}</div>
+          <div className="text-xs text-slate-400">Since {customer.connection_date}</div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-1">
+          <div className="text-xs text-slate-400">Current Security Deposit</div>
+          <div className="text-lg font-bold text-emerald-400">৳{grossDeposit.toFixed(2)}</div>
+          <div className="text-xs text-emerald-400/80">Refundable balance</div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-1">
+          <div className="text-xs text-slate-400">Total Outstanding Dues</div>
+          <div className="text-lg font-bold text-rose-400">৳{totalDue.toFixed(2)}</div>
+          <div className="text-xs text-rose-400/80">
+            {customer.status === 'disconnected' ? 'Final Status' : 'Outstanding bills'}
+          </div>
+        </div>
+
+        {parseFloat(customer.advance_balance || 0) > 0 && (
+          <div className="bg-slate-900 border border-emerald-500/30 p-5 rounded-2xl space-y-1 col-span-full sm:col-span-1">
+            <div className="text-xs text-emerald-400 font-medium">Advance Credit Balance</div>
+            <div className="text-lg font-bold text-emerald-400">৳{parseFloat(customer.advance_balance).toFixed(2)}</div>
+            <div className="text-[11px] text-emerald-300">Auto-adjusts next bills</div>
+          </div>
+        )}
+      </div>
+
+      {/* Double-Entry Customer Statement Ledger Table */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-cyan-400" />
+            Customer Financial Statement & Ledger
+          </h3>
+          <span className="text-xs text-slate-400">
+            Customer: <strong className="text-slate-200">{customer.name} ({customer.customer_code})</strong>
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
+                <th className="py-3 px-3">Transaction Date</th>
+                <th className="py-3 px-3">Document Type</th>
+                <th className="py-3 px-3">Document Number</th>
+                <th className="py-3 px-3">Date</th>
+                <th className="py-3 px-3">Notes</th>
+                <th className="py-3 px-3 text-right">Dr (৳)</th>
+                <th className="py-3 px-3 text-right">Cr (৳)</th>
+                <th className="py-3 px-3 text-right">Balance (৳)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
+              {/* Opening Balance Row */}
+              <tr className="bg-slate-950/30">
+                <td className="py-3 px-3 text-slate-500 font-sans">{connectionDateFormatted}</td>
+                <td className="py-3 px-3 text-slate-500 font-sans">-</td>
+                <td className="py-3 px-3 text-slate-500 font-sans">-</td>
+                <td className="py-3 px-3 text-slate-500 font-sans">{connectionDateFormatted}</td>
+                <td className="py-3 px-3 text-slate-400 font-sans italic">Opening balance as on {connectionDateFormatted}</td>
+                <td className="py-3 px-3 text-right text-slate-500 font-sans">-</td>
+                <td className="py-3 px-3 text-right text-slate-500 font-sans">-</td>
+                <td className="py-3 px-3 text-right font-bold text-slate-300">0.00 Dr</td>
+              </tr>
+
+              {statementRows.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="py-6 text-center text-slate-500 font-sans">
+                    No transactions recorded for this customer yet.
+                  </td>
+                </tr>
+              ) : (
+                statementRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-3 text-slate-400 font-sans">{row.txDate}</td>
+                    <td className="py-3 px-3 font-sans">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                        row.docType === 'Bill'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      }`}>
+                        {row.docType}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 font-bold text-cyan-400">{row.docNo}</td>
+                    <td className="py-3 px-3 text-slate-400 font-sans">{row.date}</td>
+                    <td className="py-3 px-3 text-slate-300 font-sans text-[11px] max-w-xs">{row.notes}</td>
+                    <td className="py-3 px-3 text-right font-bold text-slate-200">
+                      {row.dr > 0 ? `৳${row.dr.toFixed(2)}` : <span className="text-slate-600 font-sans">-</span>}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-emerald-400">
+                      {row.cr > 0 ? `৳${row.cr.toFixed(2)}` : <span className="text-slate-600 font-sans">-</span>}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-slate-100">
+                      {row.balance >= 0
+                        ? `${row.balance.toFixed(2)} Dr`
+                        : `${Math.abs(row.balance).toFixed(2)} Cr`}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {/* Statement Summary Footer */}
+            {statementRows.length > 0 && (
+              <tfoot>
+                <tr className="bg-slate-950 font-bold text-xs border-t-2 border-slate-800 text-slate-200">
+                  <td colSpan="5" className="py-3.5 px-3 uppercase text-slate-400 text-right font-sans">
+                    Statement Totals:
+                  </td>
+                  <td className="py-3.5 px-3 text-right text-slate-100 font-mono">৳{totalDr.toFixed(2)}</td>
+                  <td className="py-3.5 px-3 text-right text-emerald-400 font-mono">৳{totalCr.toFixed(2)}</td>
+                  <td className="py-3.5 px-3 text-right text-cyan-400 font-mono">
+                    {runningBalance >= 0
+                      ? `${runningBalance.toFixed(2)} Dr`
+                      : `${Math.abs(runningBalance).toFixed(2)} Cr`}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Security Deposit Ledger History */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+        <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          Security Deposit Ledger History
+        </h3>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 uppercase tracking-wider">
+                <th className="py-3 px-3">Date</th>
+                <th className="py-3 px-3">Type</th>
+                <th className="py-3 px-3">Remarks</th>
+                <th className="py-3 px-3 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 text-slate-300">
+              {customer.deposits?.length === 0 ? (
+                <tr><td colSpan="4" className="py-4 text-center text-slate-500">No deposit records found.</td></tr>
+              ) : (
+                customer.deposits?.map((d) => (
+                  <tr key={d.id}>
+                    <td className="py-2.5 px-3 text-slate-400">{d.date}</td>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                        d.type === 'collected' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                      }`}>
+                        {d.type}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-400 text-[11px] truncate max-w-xs">{d.remarks}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-slate-200">৳{parseFloat(d.amount).toFixed(2)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Disconnection & Deposit Refund Modal */}
+      {showRefundModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-400" />
+              Disconnect & Refund Security Deposit
+            </h3>
+
+            {refundResult ? (
+              <div className="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs">
+                <div className="text-emerald-400 font-bold text-sm">Disconnection & Refund Successful!</div>
+                <div className="space-y-1 text-slate-300">
+                  <p>Gross Deposit: <strong className="text-slate-100">৳{parseFloat(refundResult.gross_deposit).toFixed(2)}</strong></p>
+                  <p>Unpaid Dues Deducted: <strong className="text-rose-400">৳{parseFloat(refundResult.unpaid_due_deducted).toFixed(2)}</strong></p>
+                  <p>Net Amount Refunded: <strong className="text-emerald-400">৳{parseFloat(refundResult.net_refund_amount).toFixed(2)}</strong></p>
+                </div>
+                <button
+                  onClick={() => { setShowRefundModal(false); setRefundResult(null); }}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleRefundSubmit} className="space-y-4 text-xs">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Gross Security Deposit:</span>
+                    <span className="font-bold text-emerald-400">৳{grossDeposit.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Total Unpaid Dues:</span>
+                    <span className="font-bold text-rose-400">৳{totalDue.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-800 pt-1 font-bold">
+                    <span className="text-slate-200">Net Payable Refund:</span>
+                    <span className="text-cyan-400">৳{Math.max(0, grossDeposit - totalDue).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Disconnection Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={refundData.date}
+                    onChange={(e) => setRefundData({ ...refundData, date: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Remarks / Disconnection Reason</label>
+                  <textarea
+                    rows="2"
+                    placeholder="Reason for disconnection..."
+                    value={refundData.remarks}
+                    onChange={(e) => setRefundData({ ...refundData, remarks: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRefundModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-rose-500 hover:bg-rose-400 text-white font-semibold rounded-xl shadow-lg shadow-rose-500/20"
+                  >
+                    Confirm Refund & Disconnect
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CustomerDetailPage;
