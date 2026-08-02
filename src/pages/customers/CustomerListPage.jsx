@@ -500,13 +500,13 @@ const CustomerListPage = () => {
         </div>
 
         {/* Pagination Footer */}
-        {!loading && filteredCustomers.length > 0 && (
+        {!loading && customers.length > 0 && (
           <div className="border-t border-slate-800">
             <Pagination
               currentPage={currentPage}
               totalPages={totalPages}
               onPageChange={(page) => setCurrentPage(page)}
-              totalItems={filteredCustomers.length}
+              totalItems={customers.length}
               itemsPerPage={ITEMS_PER_PAGE}
             />
           </div>
