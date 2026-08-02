@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -26,6 +26,44 @@ import CustomerStatementPage from './pages/reports/CustomerStatementPage';
 import UserManagementPage from './pages/users/UserManagementPage';
 import AreaManagementPage from './pages/areas/AreaManagementPage';
 
+const PageTitleUpdater = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    const titleMap = {
+      '/login': 'Login | Cable TV System',
+      '/dashboard': 'Dashboard | Cable TV System',
+      '/customers': 'Customer Registry | Cable TV System',
+      '/customers/new': 'Add Customer | Cable TV System',
+      '/billing/list': 'Monthly Billing Registry | Cable TV System',
+      '/billing/generate': 'Bulk Bill Generation | Cable TV System',
+      '/collector/quick': 'Quick Bill Collection | Cable TV System',
+      '/collector/my-customers': 'My Zone Customers | Cable TV System',
+      '/collector/my-collections': 'My Daily Collections | Cable TV System',
+      '/reports/collection-summary': 'Collection Summary | Cable TV System',
+      '/reports/customer-statement': 'Customer Statement | Cable TV System',
+      '/reports/due-customers': 'Outstanding Due Report | Cable TV System',
+      '/reports/deposit-ledger': 'Deposit Ledger | Cable TV System',
+      '/areas': 'Area Management | Cable TV System',
+      '/users': 'User Management | Cable TV System',
+    };
+
+    let title = titleMap[location.pathname];
+    if (!title) {
+      if (location.pathname.startsWith('/customers/')) {
+        title = 'Subscriber Details | Cable TV System';
+      } else if (location.pathname.startsWith('/collector/collect/')) {
+        title = 'Collect Bill | Cable TV System';
+      } else {
+        title = 'Cable TV — Customer & Billing System';
+      }
+    }
+    document.title = title;
+  }, [location]);
+
+  return null;
+};
+
 const AppLayout = ({ children }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
@@ -49,6 +87,7 @@ function App() {
   return (
     <AuthProvider>
       <Router>
+        <PageTitleUpdater />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
 
