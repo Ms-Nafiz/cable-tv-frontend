@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { Tv, ShieldCheck, UserCheck, AlertCircle } from 'lucide-react';
@@ -8,8 +8,28 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { user, login, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      if (user.role === 'collector') {
+        navigate('/collector/quick', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
+    }
+  }, [user, authLoading, navigate]);
+
+  if (authLoading || user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="text-center text-cyan-400 text-xs font-semibold animate-pulse">
+          Redirecting to system dashboard...
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,11 +37,11 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      const user = await login(phone, password);
-      if (user.role === 'collector') {
-        navigate('/billing/quick-collect');
+      const userData = await login(phone, password);
+      if (userData.role === 'collector') {
+        navigate('/collector/quick', { replace: true });
       } else {
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid phone or password');
