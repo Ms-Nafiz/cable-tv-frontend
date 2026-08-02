@@ -3,6 +3,7 @@ import api from '../../api/axios';
 import { useAuth } from '../../auth/AuthContext';
 import { FileText, DollarSign, Calendar, Filter, Printer, FileSpreadsheet, Edit, Trash2, X, Save } from 'lucide-react';
 import Pagination from '../../components/Pagination';
+import ConfirmModal from '../../components/ConfirmModal';
 
 const CollectionReportPage = () => {
   const [data, setData] = useState({
@@ -56,6 +57,43 @@ const CollectionReportPage = () => {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'danger',
+    confirmText: 'Confirm',
+    showCancel: true,
+    onConfirm: () => {},
+  });
+
+  const showAlert = (title, message, type = 'info') => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      confirmText: 'OK',
+      showCancel: false,
+      onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+    });
+  };
+
+  const showConfirm = (title, message, onConfirmAction, type = 'danger', confirmText = 'Delete') => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      confirmText,
+      showCancel: true,
+      onConfirm: () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        onConfirmAction();
+      },
+    });
+  };
+
   const handleOpenEdit = (payment) => {
     setEditingPayment(payment);
     setEditForm({
@@ -72,29 +110,34 @@ const CollectionReportPage = () => {
     setSavingEdit(true);
     try {
       await api.put(`/payments/${editingPayment.id}`, editForm);
-      alert('Collection payment updated successfully!');
+      showAlert('Success', 'Collection payment updated successfully!', 'success');
       setEditingPayment(null);
       fetchReport();
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || 'Failed to update payment collection');
+      showAlert('Error', err.response?.data?.message || 'Failed to update payment collection', 'danger');
     } finally {
       setSavingEdit(false);
     }
   };
 
-  const handleDeletePayment = async (payment) => {
-    if (!window.confirm(`Are you sure you want to DELETE money receipt ${payment.receipt_no}? This action will restore the bill balance as unpaid/partial.`)) {
-      return;
-    }
-    try {
-      await api.delete(`/payments/${payment.id}`);
-      alert(`Money receipt ${payment.receipt_no} deleted successfully.`);
-      fetchReport();
-    } catch (err) {
-      console.error(err);
-      alert(err.response?.data?.message || 'Failed to delete payment collection');
-    }
+  const handleDeletePayment = (payment) => {
+    showConfirm(
+      'Confirm Receipt Deletion',
+      `Are you sure you want to DELETE money receipt ${payment.receipt_no}? This action will restore the bill balance as unpaid/partial.`,
+      async () => {
+        try {
+          await api.delete(`/payments/${payment.id}`);
+          showAlert('Deleted', `Money receipt ${payment.receipt_no} deleted successfully.`, 'success');
+          fetchReport();
+        } catch (err) {
+          console.error(err);
+          showAlert('Error', err.response?.data?.message || 'Failed to delete payment collection', 'danger');
+        }
+      },
+      'danger',
+      'Yes, Delete Receipt'
+    );
   };
 
   useEffect(() => {
@@ -417,6 +460,12 @@ const CollectionReportPage = () => {
           </div>
         </div>
       )}
+
+      {/* Global Confirm Modal */}
+      <ConfirmModal
+        {...modalConfig}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };
