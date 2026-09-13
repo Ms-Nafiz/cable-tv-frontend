@@ -221,10 +221,19 @@ const QuickCollectionPage = () => {
                           {c.name}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                      <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
                         <span>Phone: {c.phone}</span>
                         <span>•</span>
                         <span>Zone: {c.area?.name}</span>
+                        {c.address && (
+                          <>
+                            <span>•</span>
+                            <span className="text-slate-300 flex items-center gap-1 font-medium">
+                              <MapPin className="w-3 h-3 text-rose-400 shrink-0" />
+                              {c.address}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -262,10 +271,21 @@ const QuickCollectionPage = () => {
                 <span className="font-mono text-xs font-bold text-cyan-400 px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/30">
                   {selectedCustomer.customer_code}
                 </span>
-                <span className="text-xs text-slate-400">{selectedCustomer.area?.name}</span>
+                <span className="text-xs text-slate-400 font-semibold">{selectedCustomer.area?.name}</span>
               </div>
               <h3 className="font-bold text-slate-100 text-base mt-1">{selectedCustomer.name}</h3>
-              <p className="text-xs text-slate-400">{selectedCustomer.phone}</p>
+              <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                <span className="flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  {selectedCustomer.phone}
+                </span>
+                {selectedCustomer.address && (
+                  <span className="flex items-center gap-1 text-slate-300 font-medium bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    {selectedCustomer.address}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-2">

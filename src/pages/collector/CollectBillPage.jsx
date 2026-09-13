@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
-import { ArrowLeft, DollarSign, CheckCircle2, Tv, CreditCard, Wallet, Building2, Banknote } from 'lucide-react';
+import { ArrowLeft, DollarSign, CheckCircle2, Tv, CreditCard, Wallet, Building2, Banknote, MapPin } from 'lucide-react';
 import ReceiptModal from '../../components/ReceiptModal';
 
 const CollectBillPage = () => {
@@ -107,9 +107,20 @@ const CollectBillPage = () => {
       {/* Customer Info Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex justify-between items-center">
         <div>
-          <span className="font-mono text-xs font-bold text-cyan-400">{customer.customer_code}</span>
-          <h3 className="font-bold text-slate-100 text-base">{customer.name}</h3>
-          <p className="text-xs text-slate-400">{customer.phone} • {customer.area?.name}</p>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs font-bold text-cyan-400">{customer.customer_code}</span>
+            <span className="text-xs text-slate-400 font-semibold">{customer.area?.name}</span>
+          </div>
+          <h3 className="font-bold text-slate-100 text-base mt-0.5">{customer.name}</h3>
+          <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+            <span>{customer.phone}</span>
+            {customer.address && (
+              <span className="text-slate-300 font-medium flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                {customer.address}
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-right">
           <span className="text-[11px] text-slate-400 block">Total Due</span>
