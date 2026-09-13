@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api/axios';
-import { Search, Calendar, Filter, Receipt, Eye, X, CheckCircle2, Loader2, Printer, User, Phone, MapPin, Tv, ShieldCheck, AlertCircle, FileText, Download, CreditCard, DollarSign, Upload, FileSpreadsheet } from 'lucide-react';
+import { useAuth } from '../../auth/AuthContext';
+import { Search, Calendar, Filter, Receipt, Eye, X, CheckCircle2, Loader2, Printer, User, Phone, MapPin, Tv, ShieldCheck, AlertCircle, FileText, Download, CreditCard, DollarSign, Upload, FileSpreadsheet, Edit, Trash2, Save } from 'lucide-react';
 import Pagination from '../../components/Pagination';
+import ConfirmModal from '../../components/ConfirmModal';
 import { formatCurrency, formatBillMonth, formatDate } from '../../utils/formatters';
 
 const BillListPage = () => {
@@ -49,6 +51,100 @@ const BillListPage = () => {
   const [paymentImportFile, setPaymentImportFile] = useState(null);
   const [paymentImporting, setPaymentImporting] = useState(false);
   const [paymentImportResult, setPaymentImportResult] = useState(null);
+
+  const { hasRole } = useAuth();
+
+  // Edit Bill Modal state
+  const [editingBill, setEditingBill] = useState(null);
+  const [editBillForm, setEditBillForm] = useState({
+    amount: '',
+    due_date: '',
+    status: 'unpaid',
+  });
+  const [editingSubmitting, setEditingSubmitting] = useState(false);
+
+  // Confirm Modal state
+  const [confirmConfig, setConfirmConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'danger',
+    confirmText: 'Confirm',
+    showCancel: true,
+    onConfirm: () => {},
+  });
+
+  const showAlert = (title, message, type = 'info') => {
+    setConfirmConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      confirmText: 'OK',
+      showCancel: false,
+      onConfirm: () => setConfirmConfig(prev => ({ ...prev, isOpen: false })),
+    });
+  };
+
+  const showConfirm = (title, message, onConfirmAction, type = 'danger', confirmText = 'Delete') => {
+    setConfirmConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      confirmText,
+      showCancel: true,
+      onConfirm: () => {
+        setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        onConfirmAction();
+      },
+    });
+  };
+
+  const openEditBillModal = (bill) => {
+    setEditingBill(bill);
+    setEditBillForm({
+      amount: bill.amount,
+      due_date: bill.due_date ? bill.due_date.split('T')[0] : '',
+      status: bill.status || 'unpaid',
+    });
+  };
+
+  const handleEditBillSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingBill) return;
+    setEditingSubmitting(true);
+    try {
+      await api.put(`/bills/${editingBill.id}`, editBillForm);
+      showAlert('Success', `Bill for ${editingBill.customer?.name} updated successfully!`, 'success');
+      setEditingBill(null);
+      fetchBills();
+    } catch (err) {
+      console.error(err);
+      showAlert('Error', err.response?.data?.message || 'Failed to update bill', 'danger');
+    } finally {
+      setEditingSubmitting(false);
+    }
+  };
+
+  const handleDeleteBill = (bill) => {
+    showConfirm(
+      'Confirm Bill Deletion',
+      `Are you sure you want to DELETE the bill (${bill.bill_month}) for ${bill.customer?.name} (${bill.customer?.customer_code})? Any associated payment entries will also be removed.`,
+      async () => {
+        try {
+          await api.delete(`/bills/${bill.id}`);
+          showAlert('Deleted', `Bill for ${bill.customer?.name} deleted successfully.`, 'success');
+          fetchBills();
+        } catch (err) {
+          console.error(err);
+          showAlert('Error', err.response?.data?.message || 'Failed to delete bill', 'danger');
+        }
+      },
+      'danger',
+      'Yes, Delete Bill'
+    );
+  };
 
   const handleDownloadPaymentSample = async () => {
     try {
@@ -468,6 +564,26 @@ const BillListPage = () => {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+
+                        {hasRole('super_admin', 'accounts') && (
+                          <button
+                            onClick={() => openEditBillModal(b)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition"
+                            title="Edit Bill Details"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {hasRole('super_admin') && (
+                          <button
+                            onClick={() => handleDeleteBill(b)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                            title="Delete Bill (Super Admin Only)"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -990,6 +1106,99 @@ const BillListPage = () => {
           </div>
         </div>
       )}
+
+      {/* In-Page Edit Bill Modal */}
+      {editingBill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Edit className="w-5 h-5 text-amber-400" />
+                Edit Monthly Bill: {formatBillMonth(editingBill.bill_month)}
+              </h3>
+              <button
+                onClick={() => setEditingBill(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Subscriber Info Header */}
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-mono font-bold text-cyan-400">{editingBill.customer?.customer_code}</span>
+                <span className="text-[10px] text-slate-400">{editingBill.customer?.area?.name}</span>
+              </div>
+              <div className="font-bold text-slate-100">{editingBill.customer?.name}</div>
+              <div className="text-slate-400 text-[11px]">{editingBill.customer?.phone} • {editingBill.customer?.address}</div>
+            </div>
+
+            <form onSubmit={handleEditBillSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">Monthly Bill Amount (৳)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={editBillForm.amount}
+                  onChange={(e) => setEditBillForm({ ...editBillForm, amount: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">Bill Payment Due Date</label>
+                <input
+                  type="date"
+                  required
+                  value={editBillForm.due_date}
+                  onChange={(e) => setEditBillForm({ ...editBillForm, due_date: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">Bill Status</label>
+                <select
+                  value={editBillForm.status}
+                  onChange={(e) => setEditBillForm({ ...editBillForm, status: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-medium"
+                >
+                  <option value="unpaid">Unpaid (Outstanding)</option>
+                  <option value="partial">Partial (Partially Paid)</option>
+                  <option value="paid">Paid (Fully Cleared)</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingBill(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editingSubmitting}
+                  className="inline-flex items-center gap-1.5 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-amber-600/20 transition disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  {editingSubmitting ? 'Updating Bill...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Global Confirm Modal */}
+      <ConfirmModal
+        {...confirmConfig}
+        onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };
