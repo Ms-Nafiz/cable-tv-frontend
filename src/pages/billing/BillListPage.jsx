@@ -58,6 +58,7 @@ const BillListPage = () => {
   const [editingBill, setEditingBill] = useState(null);
   const [editBillForm, setEditBillForm] = useState({
     amount: '',
+    previous_dues: '',
     due_date: '',
     status: 'unpaid',
   });
@@ -105,6 +106,7 @@ const BillListPage = () => {
     setEditingBill(bill);
     setEditBillForm({
       amount: bill.amount,
+      previous_dues: bill.previous_dues !== undefined && bill.previous_dues !== null ? bill.previous_dues : 0,
       due_date: bill.due_date ? bill.due_date.split('T')[0] : '',
       status: bill.status || 'unpaid',
     });
@@ -1145,6 +1147,19 @@ const BillListPage = () => {
                   value={editBillForm.amount}
                   onChange={(e) => setEditBillForm({ ...editBillForm, amount: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">Previous Dues (পূর্বের বকেয়া) (৳)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editBillForm.previous_dues}
+                  onChange={(e) => setEditBillForm({ ...editBillForm, previous_dues: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 focus:outline-none focus:border-cyan-500 font-bold"
+                  placeholder="0.00"
                 />
               </div>
 
