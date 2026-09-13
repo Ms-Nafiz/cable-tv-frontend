@@ -121,6 +121,9 @@ const DueReportPage = () => {
                     <td className="py-3 px-4">
                       <div className="font-mono font-bold text-cyan-400">{c.customer_code}</div>
                       <div className="font-semibold text-slate-200">{c.name}</div>
+                      {c.address && (
+                        <div className="text-[10px] text-slate-400 font-normal truncate max-w-xs">{c.address}</div>
+                      )}
                     </td>
                     <td className="py-3 px-4 font-mono">{c.phone}</td>
                     <td className="py-3 px-4">{c.area?.name}</td>

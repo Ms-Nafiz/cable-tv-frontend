@@ -106,7 +106,10 @@ const MyCollectionsPage = () => {
                     <td className="py-3.5 px-4 font-mono font-bold text-cyan-400">{p.receipt_no}</td>
                     <td className="py-3.5 px-4">
                       <div className="font-semibold text-slate-100">{p.customer?.name}</div>
-                      <div className="font-mono text-[10px] text-slate-400">{p.customer?.customer_code}</div>
+                      <div className="font-mono text-[10px] text-cyan-400">{p.customer?.customer_code} • {p.customer?.area?.name}</div>
+                      {p.customer?.address && (
+                        <div className="text-[10px] text-slate-400 font-normal truncate max-w-xs">{p.customer.address}</div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 font-mono">{p.bill?.bill_month}</td>
                     <td className="py-3.5 px-4 uppercase font-medium text-slate-300">{p.payment_method}</td>

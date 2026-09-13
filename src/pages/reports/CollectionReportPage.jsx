@@ -315,7 +315,12 @@ const CollectionReportPage = () => {
                   <tr key={p.id}>
                     <td className="py-3 px-4 font-mono font-bold text-cyan-400">{p.receipt_no}</td>
                     <td className="py-3 px-4 text-slate-400">{new Date(p.payment_date).toLocaleDateString()}</td>
-                    <td className="py-3 px-4 font-medium text-slate-200">{p.customer?.name} ({p.customer?.customer_code})</td>
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-slate-200">{p.customer?.name} ({p.customer?.customer_code})</div>
+                      {p.customer?.address && (
+                        <div className="text-[10px] text-slate-400 font-normal truncate max-w-xs">{p.customer.address}</div>
+                      )}
+                    </td>
                     <td className="py-3 px-4">{p.customer?.area?.name}</td>
                     <td className="py-3 px-4">{p.collector?.name}</td>
                     <td className="py-3 px-4 uppercase font-medium">{p.payment_method}</td>

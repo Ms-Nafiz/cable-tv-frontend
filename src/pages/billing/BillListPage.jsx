@@ -406,6 +406,9 @@ const BillListPage = () => {
                     <td className="py-3 px-4">
                       <div className="font-semibold text-slate-100">{b.customer?.name}</div>
                       <div className="text-[11px] font-mono text-cyan-400">{b.customer?.customer_code} • {b.customer?.area?.name}</div>
+                      {b.customer?.address && (
+                        <div className="text-[10px] text-slate-400 font-medium truncate max-w-xs">{b.customer.address}</div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-right font-medium text-slate-200">
                       ৳{formatCurrency(b.amount)}
