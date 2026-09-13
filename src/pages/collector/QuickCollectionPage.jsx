@@ -70,8 +70,9 @@ const QuickCollectionPage = () => {
     // Process unpaid / partial bills
     const dueBills = (customer.bills || []).map((b) => {
       const paid = b.payments ? b.payments.reduce((acc, p) => acc + parseFloat(p.amount_paid), 0) : 0;
-      const due = Math.max(0, parseFloat(b.amount) - paid);
-      return { ...b, due_amount: due };
+      const billTotal = parseFloat(b.amount || 0) + parseFloat(b.previous_dues || 0);
+      const due = Math.max(0, billTotal - paid);
+      return { ...b, due_amount: due, total_billable: billTotal };
     }).filter(b => b.due_amount > 0);
 
     setUnpaidBills(dueBills);
