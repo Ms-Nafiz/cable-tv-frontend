@@ -302,14 +302,14 @@ const CollectionReportPage = () => {
                 <th className="py-3 px-4">Collector</th>
                 <th className="py-3 px-4">Method</th>
                 <th className="py-3 px-4 text-right">Amount</th>
-                {hasRole('super_admin') && <th className="py-3 px-4 text-center">Actions</th>}
+                {hasRole('super_admin', 'accounts') && <th className="py-3 px-4 text-center">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {loading ? (
-                <tr><td colSpan={hasRole('super_admin') ? 8 : 7} className="py-6 text-center text-cyan-400">Loading summary...</td></tr>
+                <tr><td colSpan={hasRole('super_admin', 'accounts') ? 8 : 7} className="py-6 text-center text-cyan-400">Loading summary...</td></tr>
               ) : paginatedPayments.length === 0 ? (
-                <tr><td colSpan={hasRole('super_admin') ? 8 : 7} className="py-6 text-center text-slate-500">No collection records found.</td></tr>
+                <tr><td colSpan={hasRole('super_admin', 'accounts') ? 8 : 7} className="py-6 text-center text-slate-500">No collection records found.</td></tr>
               ) : (
                 paginatedPayments.map((p) => (
                   <tr key={p.id}>
@@ -325,7 +325,7 @@ const CollectionReportPage = () => {
                     <td className="py-3 px-4">{p.collector?.name}</td>
                     <td className="py-3 px-4 uppercase font-medium">{p.payment_method}</td>
                     <td className="py-3 px-4 text-right font-bold text-emerald-400">৳{parseFloat(p.amount_paid).toFixed(2)}</td>
-                    {hasRole('super_admin') && (
+                    {hasRole('super_admin', 'accounts') && (
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           <button

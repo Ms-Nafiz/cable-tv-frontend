@@ -114,6 +114,11 @@ const CustomerListPage = () => {
     status: 'active',
   });
 
+  // Fetch initial area options & collectors list on component mount
+  useEffect(() => {
+    fetchAreasAndUsers();
+  }, []);
+
   // Live reactive auto-filtering when any filter changes
   useEffect(() => {
     const timer = setTimeout(() => {

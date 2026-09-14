@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/axios';
-import { Search, DollarSign, CheckCircle2, User, X, Loader2, Banknote, Wallet, Building2, Phone, MapPin, Printer, CheckSquare, Square } from 'lucide-react';
+import { Search, DollarSign, CheckCircle2, AlertTriangle, User, X, Loader2, Banknote, Wallet, Building2, Phone, MapPin, Printer } from 'lucide-react';
 import ReceiptModal from '../../components/ReceiptModal';
+import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
 const QuickCollectionPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -13,7 +14,6 @@ const QuickCollectionPage = () => {
   // Selected customer & bills state
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [unpaidBills, setUnpaidBills] = useState([]);
-  const [selectedBillIds, setSelectedBillIds] = useState([]);
   const [amountPaid, setAmountPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -68,56 +68,28 @@ const QuickCollectionPage = () => {
     setSearchTerm(`${customer.customer_code} - ${customer.name}`);
 
     // Process unpaid / partial bills
-    const dueBills = (customer.bills || []).map((b) => {
-      const paid = b.payments ? b.payments.reduce((acc, p) => acc + parseFloat(p.amount_paid), 0) : 0;
-      const billTotal = parseFloat(b.amount || 0) + parseFloat(b.previous_dues || 0);
-      const due = Math.max(0, billTotal - paid);
-      return { ...b, due_amount: due, total_billable: billTotal };
+    const sortedBills = [...(customer.bills || [])].sort((a, b) => a.bill_month.localeCompare(b.bill_month));
+
+    const dueBills = sortedBills.map((b) => {
+      const due = b.calculated_due !== undefined ? parseFloat(b.calculated_due) : parseFloat(b.amount || 0);
+
+      return {
+        ...b,
+        due_amount: due,
+        total_billable: parseFloat(b.amount || 0)
+      };
     }).filter(b => b.due_amount > 0);
 
     setUnpaidBills(dueBills);
-
-    // Select all due bills by default for fast multi-month collection!
-    const allIds = dueBills.map(b => b.id);
-    setSelectedBillIds(allIds);
 
     const totalSum = dueBills.reduce((acc, b) => acc + b.due_amount, 0);
     setAmountPaid(totalSum > 0 ? totalSum.toFixed(2) : parseFloat(customer.monthly_rent || 500).toFixed(2));
     setError(null);
   };
 
-  const handleToggleBill = (billId) => {
-    let updated;
-    if (selectedBillIds.includes(billId)) {
-      updated = selectedBillIds.filter(id => id !== billId);
-    } else {
-      updated = [...selectedBillIds, billId];
-    }
-    setSelectedBillIds(updated);
-
-    // Update auto sum amount
-    const sum = unpaidBills
-      .filter(b => updated.includes(b.id))
-      .reduce((acc, b) => acc + b.due_amount, 0);
-    setAmountPaid(sum.toFixed(2));
-  };
-
-  const handleSelectAllBills = () => {
-    if (selectedBillIds.length === unpaidBills.length) {
-      setSelectedBillIds([]);
-      setAmountPaid('0.00');
-    } else {
-      const allIds = unpaidBills.map(b => b.id);
-      setSelectedBillIds(allIds);
-      const totalSum = unpaidBills.reduce((acc, b) => acc + b.due_amount, 0);
-      setAmountPaid(totalSum.toFixed(2));
-    }
-  };
-
   const handleReset = () => {
     setSelectedCustomer(null);
     setUnpaidBills([]);
-    setSelectedBillIds([]);
     setAmountPaid('');
     setNotes('');
     setError(null);
@@ -126,8 +98,8 @@ const QuickCollectionPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (unpaidBills.length > 0 && selectedBillIds.length === 0 && (!amountPaid || parseFloat(amountPaid) <= 0)) {
-      setError('Please select at least one bill month or enter an advance payment amount.');
+    if (selectedCustomer.total_bills_count === 0) {
+      setError('Payment collection is disabled because no bill has been generated yet for this customer.');
       return;
     }
 
@@ -139,10 +111,12 @@ const QuickCollectionPage = () => {
     setSubmitting(true);
     setError(null);
 
+    const allBillIds = unpaidBills.map(b => b.id);
+
     try {
       const res = await api.post('/payments', {
         customer_id: selectedCustomer.id,
-        bill_ids: selectedBillIds,
+        bill_ids: allBillIds,
         amount_paid: amountPaid,
         payment_method: paymentMethod,
         payment_date: paymentDate,
@@ -162,12 +136,14 @@ const QuickCollectionPage = () => {
     handleReset();
   };
 
+  const totalDuesSum = unpaidBills.reduce((acc, b) => acc + b.due_amount, 0);
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-slate-100">Direct Bill & Advance Collection</h2>
-        <p className="text-xs text-slate-400 mt-1">Search Customer ID to instantly collect single, multi-month dues or Advance Credit Payments.</p>
+        <h2 className="text-xl font-bold text-slate-100">Quick Collection Mode</h2>
+        <p className="text-xs text-slate-400 mt-1">Search Customer ID to instantly collect overdue monthly dues or Advance Credit Payments.</p>
       </div>
 
       {/* 1. Live Autocomplete Customer Search Bar */}
@@ -255,14 +231,14 @@ const QuickCollectionPage = () => {
           <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto">
             <DollarSign className="w-6 h-6" />
           </div>
-          <h3 className="font-bold text-slate-200 text-base">Direct & Advance Collection Mode</h3>
+          <h3 className="font-bold text-slate-200 text-base">Direct Collection Mode</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Type Customer ID above (e.g. <code>CCL00001</code>) and select a subscriber to collect overdue bills or Advance Credit Payments.
+            Type Customer ID above (e.g. <code>CCL00001</code>) and select a subscriber to record monthly collections.
           </p>
         </div>
       )}
 
-      {/* 3. Direct Multi-Month & Advance Collection Form */}
+      {/* 3. Direct Collection Form */}
       {selectedCustomer && (
         <div className="bg-slate-900 border-2 border-cyan-500/30 rounded-2xl p-6 shadow-xl space-y-5 animate-in fade-in duration-200">
           {/* Customer Header */}
@@ -312,11 +288,25 @@ const QuickCollectionPage = () => {
             </div>
           )}
 
-          {unpaidBills.length === 0 && (
+          {/* No Bill Generated Notice */}
+          {selectedCustomer.total_bills_count === 0 && (
+            <div className="p-4 bg-rose-500/15 border border-rose-500/30 rounded-xl space-y-1">
+              <div className="font-bold text-rose-400 text-sm flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                No Bill Generated Yet! Payment Collection Blocked. (বিল তৈরি হয়নি)
+              </div>
+              <p className="text-xs text-slate-300">
+                This subscriber has 0 generated bills in the system. Payment collection is disabled until a monthly bill is generated.
+              </p>
+            </div>
+          )}
+
+          {/* All Bills Paid Notice */}
+          {selectedCustomer.total_bills_count > 0 && unpaidBills.length === 0 && (
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-1">
               <div className="font-bold text-emerald-400 text-sm flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                All Current Monthly Bills Paid!
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                All Current Monthly Bills Paid! (সব বিল পরিশোধিত!)
               </div>
               <p className="text-xs text-slate-300">
                 This subscriber has 0 outstanding dues. Enter an amount below to collect an <strong className="text-emerald-400">Advance Credit Payment</strong> which will auto-clear upcoming bills.
@@ -330,61 +320,33 @@ const QuickCollectionPage = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Multi-Month Checkbox Selection (Only if unpaid bills exist) */}
-            {unpaidBills.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Select Overdue Bill Months ({unpaidBills.length} Available)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleSelectAllBills}
-                    className="text-xs text-cyan-400 hover:underline font-medium"
-                  >
-                    {selectedBillIds.length === unpaidBills.length ? 'Deselect All' : 'Select All Dues'}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-950/60 rounded-xl border border-slate-800">
-                  {unpaidBills.map((b) => {
-                    const isChecked = selectedBillIds.includes(b.id);
-                    return (
-                      <div
-                        key={b.id}
-                        onClick={() => handleToggleBill(b.id)}
-                        className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition ${
-                          isChecked
-                            ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300'
-                            : 'bg-slate-900 border-slate-800/80 text-slate-400 hover:bg-slate-850'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          {isChecked ? (
-                            <CheckSquare className="w-4 h-4 text-cyan-400 shrink-0" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-500 shrink-0" />
-                          )}
-                          <span className="font-mono text-xs font-bold">{b.bill_month}</span>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="text-xs font-bold text-rose-400">৳{b.due_amount.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+            {/* Stat Overview Cards: Monthly Bill, Total Dues & Total Payable */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Monthly Bill */}
+              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl">
+                <span className="text-[11px] font-semibold text-slate-400 block mb-1">Monthly Bill (মাসিক বিল)</span>
+                <div className="text-lg font-bold text-cyan-400">
+                  ৳{parseFloat(selectedCustomer.monthly_rent || 0).toFixed(2)}
                 </div>
               </div>
-            )}
 
-            {/* Amount & Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-950/40 p-4 rounded-xl border border-slate-800">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  {unpaidBills.length === 0
-                    ? 'Advance Payment Amount (৳)'
-                    : `Total Collection Amount (৳) — ${selectedBillIds.length} Month(s)`}
+              {/* Total Dues */}
+              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl">
+                <span className="text-[11px] font-semibold text-slate-400 block mb-1">Total Dues (মোট বকেয়া)</span>
+                <div className="text-lg font-bold text-rose-400">
+                  ৳{totalDuesSum.toFixed(2)}
+                </div>
+                {parseFloat(selectedCustomer.advance_balance || 0) > 0 && (
+                  <span className="text-[10px] text-emerald-400 font-medium block mt-0.5">
+                    (Advance Credit: ৳{parseFloat(selectedCustomer.advance_balance).toFixed(2)})
+                  </span>
+                )}
+              </div>
+
+              {/* Total Payable / Collection Amount Input */}
+              <div className="p-3.5 bg-slate-950/80 border border-cyan-500/40 rounded-xl">
+                <label className="text-[11px] font-semibold text-emerald-400 block mb-1">
+                  Total Payable / Collection (৳)
                 </label>
                 <input
                   type="number"
@@ -392,21 +354,29 @@ const QuickCollectionPage = () => {
                   required
                   value={amountPaid}
                   onChange={(e) => setAmountPaid(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-lg font-bold text-emerald-400 focus:outline-none focus:border-cyan-500"
+                  className="w-full px-3 py-1 bg-slate-900 border border-slate-700 rounded-lg text-lg font-bold text-emerald-300 focus:outline-none focus:border-cyan-400"
                 />
               </div>
+            </div>
 
-              <div className="flex flex-col justify-center">
-                <div className="text-xs text-slate-400">Collection Purpose:</div>
-                <div className="text-xs font-bold text-cyan-400 mt-1 truncate">
-                  {unpaidBills.length === 0
-                    ? 'Advance Credit Payment'
-                    : selectedBillIds.length > 0
-                    ? unpaidBills.filter(b => selectedBillIds.includes(b.id)).map(b => b.bill_month).join(', ')
-                    : 'Advance Credit Payment'}
+            {/* Small Month-wise Dues Breakdown List */}
+            {unpaidBills.length > 0 && (
+              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                  <span>Overdue Month-wise Breakdown ({unpaidBills.length} Month{unpaidBills.length > 1 ? 's' : ''})</span>
+                  <span className="text-rose-400 font-bold">Total: ৳{totalDuesSum.toFixed(2)}</span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {unpaidBills.map((b) => (
+                    <div key={b.id} className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg flex items-center gap-2 text-xs">
+                      <span className="font-mono font-bold text-cyan-400">{formatBillMonth(b.bill_month)}</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="font-bold text-rose-400">৳{b.due_amount.toFixed(2)}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Payment Method Picker */}
             <div>
@@ -464,11 +434,13 @@ const QuickCollectionPage = () => {
 
             <button
               type="submit"
-              disabled={submitting}
-              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/20 disabled:opacity-50 transition"
+              disabled={submitting || selectedCustomer.total_bills_count === 0}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-emerald-500 disabled:hover:to-teal-600 transition"
             >
               {submitting
                 ? 'Processing Collection...'
+                : selectedCustomer.total_bills_count === 0
+                ? 'Payment Collection Disabled (No Bill Generated)'
                 : unpaidBills.length === 0
                 ? `Confirm Advance Collection (৳${parseFloat(amountPaid || 0).toFixed(2)})`
                 : `Confirm Collection (৳${parseFloat(amountPaid || 0).toFixed(2)})`}

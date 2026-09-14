@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../api/axios';
 import { ArrowLeft, User, Phone, MapPin, Tv, ShieldCheck, Receipt, DollarSign, AlertCircle, RefreshCw, Printer, FileText } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
+import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
 const CustomerDetailPage = () => {
   const { id } = useParams();
@@ -66,28 +67,38 @@ const CustomerDetailPage = () => {
   const ledgerEvents = [];
 
   // 1. Add Bills as Dr (Debit) events
-  (customer.bills || []).forEach((b) => {
+  const sortedBills = [...(customer.bills || [])].sort((a, b) => a.bill_month.localeCompare(b.bill_month));
+
+  sortedBills.forEach((b) => {
     const rawDate = b.generated_at || b.created_at;
     const formattedTxDate = rawDate ? new Date(rawDate).toLocaleDateString('en-GB') : b.bill_month;
     const formattedDueDate = b.due_date ? new Date(b.due_date).toLocaleDateString('en-GB') : b.bill_month;
-    
+    const drAmount = parseFloat(b.amount || 0);
+    const formattedBillMonth = formatBillMonth(b.bill_month);
+    const advanceAdj = parseFloat(b.advance || 0);
+    const notesDetail = advanceAdj > 0
+      ? `Monthly Cable TV Bill (${formattedBillMonth}) [Advance Adjusted: ৳${formatCurrency(advanceAdj)}]`
+      : `Monthly Cable TV Bill (${formattedBillMonth})`;
+    const createdTime = rawDate ? new Date(rawDate).getTime() : new Date(b.bill_month + '-01').getTime();
+
     ledgerEvents.push({
       id: `bill-${b.id}`,
+      sortKey: `${b.bill_month}_1_${createdTime}_${b.id}`,
       txDate: formattedTxDate,
       docType: 'Bill',
-      docNo: b.bill_month,
+      docNo: formattedBillMonth,
       date: formattedDueDate,
-      notes: `Monthly Cable TV Bill (${b.bill_month})`,
-      dr: parseFloat(b.amount || 0),
+      notes: notesDetail,
+      dr: drAmount,
       cr: 0,
-      timestamp: rawDate ? new Date(rawDate).getTime() : new Date(b.bill_month + '-01').getTime(),
+      timestamp: createdTime,
     });
   });
 
   // 2. Group Payments by Master Receipt Number as Cr (Credit) events
   const paymentGroups = new Map();
   (customer.payments || []).forEach((p) => {
-    const masterReceipt = p.receipt_no ? p.receipt_no.replace(/-\d+$/, '') : `RCPT-${p.id}`;
+    const masterReceipt = p.receipt_no ? p.receipt_no : `RCPT-${p.id}`;
     if (!paymentGroups.has(masterReceipt)) {
       paymentGroups.set(masterReceipt, {
         id: `pay-group-${masterReceipt}`,
@@ -111,7 +122,16 @@ const CustomerDetailPage = () => {
 
   paymentGroups.forEach((grp) => {
     const formattedDate = grp.rawDate ? new Date(grp.rawDate).toLocaleDateString('en-GB') : '-';
-    const monthStr = grp.months.length > 0 ? ` (${grp.months.join(', ')})` : '';
+    const payTs = grp.rawDate ? new Date(grp.rawDate).getTime() : Date.now();
+    const payMonthStr = grp.rawDate ? grp.rawDate.substring(0, 7) : null;
+
+    const sortedGrpMonths = [...grp.months].sort();
+    const lastBillMonth = sortedGrpMonths.length > 0 ? sortedGrpMonths[sortedGrpMonths.length - 1] : null;
+
+    let targetMonth = lastBillMonth || payMonthStr || '9999-12';
+
+    const formattedMonthsStr = grp.months.map(m => formatBillMonth(m)).join(', ');
+    const monthStr = formattedMonthsStr ? ` (${formattedMonthsStr})` : '';
 
     const notesText = grp.isAdvance && grp.months.length === 0
       ? `Advance Credit Payment via ${grp.paymentMethod?.toUpperCase()}${grp.collectorName ? ' (Collector: ' + grp.collectorName + ')' : ''}`
@@ -119,6 +139,7 @@ const CustomerDetailPage = () => {
 
     ledgerEvents.push({
       id: grp.id,
+      sortKey: `${targetMonth}_2_${payTs}_${grp.docNo}`,
       txDate: formattedDate,
       docType: 'Payment',
       docNo: grp.docNo,
@@ -126,12 +147,12 @@ const CustomerDetailPage = () => {
       notes: notesText,
       dr: 0,
       cr: grp.totalAmount,
-      timestamp: grp.rawDate ? new Date(grp.rawDate).getTime() : 0,
+      timestamp: payTs,
     });
   });
 
-  // Sort chronologically (oldest to newest)
-  ledgerEvents.sort((a, b) => a.timestamp - b.timestamp);
+  // Sort chronologically by bill month & event order (Bills first, then Payments for that month)
+  ledgerEvents.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
   // Compute running balance per row
   let runningBalance = 0;
@@ -261,18 +282,6 @@ const CustomerDetailPage = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
-              {/* Opening Balance Row */}
-              <tr className="bg-slate-950/30">
-                <td className="py-3 px-3 text-slate-500 font-sans">{connectionDateFormatted}</td>
-                <td className="py-3 px-3 text-slate-500 font-sans">-</td>
-                <td className="py-3 px-3 text-slate-500 font-sans">-</td>
-                <td className="py-3 px-3 text-slate-500 font-sans">{connectionDateFormatted}</td>
-                <td className="py-3 px-3 text-slate-400 font-sans italic">Opening balance as on {connectionDateFormatted}</td>
-                <td className="py-3 px-3 text-right text-slate-500 font-sans">-</td>
-                <td className="py-3 px-3 text-right text-slate-500 font-sans">-</td>
-                <td className="py-3 px-3 text-right font-bold text-slate-300">0.00 Dr</td>
-              </tr>
-
               {statementRows.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="py-6 text-center text-slate-500 font-sans">

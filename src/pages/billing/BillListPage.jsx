@@ -260,7 +260,8 @@ const BillListPage = () => {
       }));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Bill_Sheet_${monthFilter || 'All'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      const activeMonth = monthFilter || (bills.length > 0 ? bills[0].bill_month : 'All');
+      link.setAttribute('download', `Bill_Sheet_${activeMonth}_${new Date().toISOString().slice(0, 10)}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -523,7 +524,7 @@ const BillListPage = () => {
                       )}
                     </td>
                     <td className="py-3 px-4 text-right font-semibold text-cyan-400">
-                      ৳{formatCurrency(b.advance_credit || 0)}
+                      ৳{formatCurrency(parseFloat(b.advance || 0) + parseFloat(b.advance_credit || 0))}
                     </td>
                     <td className="py-3 px-4 text-right font-bold text-emerald-400 text-sm">
                       ৳{formatCurrency(b.net_total_payable !== undefined ? b.net_total_payable : b.due_amount)}

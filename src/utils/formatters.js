@@ -13,7 +13,8 @@ export const formatBillMonth = (billMonth) => {
   const year = parts[0];
   const monthIdx = parseInt(parts[1], 10) - 1;
   const date = new Date(year, monthIdx, 1);
-  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const monthShort = date.toLocaleDateString('en-US', { month: 'short' });
+  return `${monthShort}-${year}`;
 };
 
 export const formatDate = (dateStr) => {
