@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api/axios';
 import { useAuth } from '../../auth/AuthContext';
-import { Search, Calendar, Filter, Receipt, Eye, X, CheckCircle2, Loader2, Printer, User, Phone, MapPin, Tv, ShieldCheck, AlertCircle, FileText, Download, CreditCard, DollarSign, Upload, FileSpreadsheet, Edit, Trash2, Save } from 'lucide-react';
+import { Search, Calendar, Filter, Receipt, Eye, X, CheckCircle2, Loader2, Printer, User, Phone, MapPin, Tv, ShieldCheck, AlertCircle, FileText, Download, CreditCard, DollarSign, Upload, FileSpreadsheet, Edit, Trash2, Save, Users } from 'lucide-react';
 import Pagination from '../../components/Pagination';
 import ConfirmModal from '../../components/ConfirmModal';
 import { formatCurrency, formatBillMonth, formatDate } from '../../utils/formatters';
@@ -23,10 +23,17 @@ const BillListPage = () => {
 
   // In-Page Generate Bills Modal state
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateMode, setGenerateMode] = useState('bulk'); // 'bulk' | 'single'
   const [generateData, setGenerateData] = useState({
     bill_month: new Date().toISOString().slice(0, 7), // YYYY-MM
     due_date: new Date(new Date().getFullYear(), new Date().getMonth(), 25).toISOString().split('T')[0],
+    amount: '',
+    previous_dues: '',
   });
+  const [genSearchQuery, setGenSearchQuery] = useState('');
+  const [genSearchResults, setGenSearchResults] = useState([]);
+  const [genSearching, setGenSearching] = useState(false);
+  const [genSelectedCustomer, setGenSelectedCustomer] = useState(null);
   const [modalSubmitting, setModalSubmitting] = useState(false);
   const [modalResult, setModalResult] = useState(null);
   const [modalError, setModalError] = useState('');
@@ -203,6 +210,55 @@ const BillListPage = () => {
     return () => clearTimeout(timer);
   }, [search, monthFilter, statusFilter, areaFilter]);
 
+  // Live customer search in generate modal
+  useEffect(() => {
+    if (!genSearchQuery.trim() || generateMode !== 'single') {
+      setGenSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setGenSearching(true);
+      try {
+        const res = await api.get('/customers', {
+          params: { search: genSearchQuery.trim() }
+        });
+        setGenSearchResults(res.data.slice(0, 8));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setGenSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [genSearchQuery, generateMode]);
+
+  const calculateSuggestedRent = (cust, monthStr) => {
+    if (!cust) return '0';
+    const rent = parseFloat(cust.monthly_rent || 0);
+    if (!cust.connection_date || !monthStr) return rent.toFixed(2);
+
+    const connStr = cust.connection_date.substring(0, 10);
+    if (connStr.startsWith(monthStr)) {
+      const connDay = parseInt(connStr.split('-')[2], 10);
+      if (connDay >= 11) {
+        const [year, month] = monthStr.split('-').map(Number);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const activeDays = Math.max(1, daysInMonth - connDay + 1);
+        const exact = (rent / daysInMonth) * activeDays;
+        return (Math.ceil(exact / 5) * 5).toFixed(2);
+      }
+    }
+    return rent.toFixed(2);
+  };
+
+  const handleSelectGenCustomer = (cust) => {
+    setGenSelectedCustomer(cust);
+    setGenSearchQuery('');
+    setGenSearchResults([]);
+    const suggested = calculateSuggestedRent(cust, generateData.bill_month);
+    setGenerateData(prev => ({ ...prev, amount: suggested }));
+  };
+
   const fetchAreas = async () => {
     try {
       const res = await api.get('/areas');
@@ -278,8 +334,34 @@ const BillListPage = () => {
     setModalResult(null);
 
     try {
-      const res = await api.post('/bills/generate', generateData);
-      setModalResult(res.data);
+      if (generateMode === 'single') {
+        if (!genSelectedCustomer) {
+          setModalError('Please select a subscriber first.');
+          setModalSubmitting(false);
+          return;
+        }
+
+        const payload = {
+          customer_id: genSelectedCustomer.id,
+          bill_month: generateData.bill_month,
+          due_date: generateData.due_date,
+        };
+        if (generateData.amount !== '' && !isNaN(generateData.amount)) {
+          payload.amount = parseFloat(generateData.amount);
+        }
+        if (generateData.previous_dues !== '' && !isNaN(generateData.previous_dues)) {
+          payload.previous_dues = parseFloat(generateData.previous_dues);
+        }
+
+        const res = await api.post('/bills/generate-single', payload);
+        setModalResult(res.data);
+      } else {
+        const res = await api.post('/bills/generate', {
+          bill_month: generateData.bill_month,
+          due_date: generateData.due_date,
+        });
+        setModalResult(res.data);
+      }
       fetchBills();
     } catch (err) {
       setModalError(err.response?.data?.message || 'Failed to generate monthly bills');
@@ -367,11 +449,18 @@ const BillListPage = () => {
           </button>
 
           <button
-            onClick={() => { setShowGenerateModal(true); setModalResult(null); setModalError(''); }}
+            onClick={() => {
+              setShowGenerateModal(true);
+              setGenerateMode('bulk');
+              setGenSelectedCustomer(null);
+              setGenSearchQuery('');
+              setModalResult(null);
+              setModalError('');
+            }}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-500/20 transition"
           >
             <Calendar className="w-4 h-4" />
-            Bulk Bill Generate
+            Generate Bills
           </button>
         </div>
       </div>
@@ -942,11 +1031,11 @@ const BillListPage = () => {
       {/* In-Page Generate Monthly Bills Modal */}
       {showGenerateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-cyan-400" />
-                Generate Bulk Monthly Bills
+                {generateMode === 'bulk' ? 'Generate Bulk Monthly Bills' : 'Generate Single Subscriber Bill'}
               </h3>
               <button
                 onClick={() => setShowGenerateModal(false)}
@@ -956,19 +1045,57 @@ const BillListPage = () => {
               </button>
             </div>
 
+            {/* Mode Switcher Tabs */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => { setGenerateMode('bulk'); setModalError(''); setModalResult(null); }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition ${
+                  generateMode === 'bulk'
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                Bulk (All Active)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setGenerateMode('single'); setModalError(''); setModalResult(null); }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition ${
+                  generateMode === 'single'
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                Single Subscriber
+              </button>
+            </div>
+
             {modalResult ? (
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-2 text-xs">
                 <div className="font-bold text-emerald-400 flex items-center gap-2 text-sm">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                   {modalResult.message}
                 </div>
-                <div className="space-y-1 text-slate-300 pt-1">
-                  <p>Bills Generated: <strong className="text-slate-100">{modalResult.generated_count}</strong></p>
-                  <p>Skipped (Already Existed): <strong className="text-slate-400">{modalResult.skipped_count}</strong></p>
-                  {modalResult.advance_adjusted_count > 0 && (
-                    <p>Advance Credit Auto-Adjusted: <strong className="text-emerald-400">{modalResult.advance_adjusted_count} subscribers</strong></p>
-                  )}
-                </div>
+                {generateMode === 'bulk' ? (
+                  <div className="space-y-1 text-slate-300 pt-1">
+                    <p>Bills Generated: <strong className="text-slate-100">{modalResult.generated_count}</strong></p>
+                    <p>Skipped (Already Existed): <strong className="text-slate-400">{modalResult.skipped_count}</strong></p>
+                    {modalResult.advance_adjusted_count > 0 && (
+                      <p>Advance Credit Auto-Adjusted: <strong className="text-emerald-400">{modalResult.advance_adjusted_count} subscribers</strong></p>
+                    )}
+                  </div>
+                ) : modalResult.bill ? (
+                  <div className="grid grid-cols-2 gap-2 text-slate-300 pt-1">
+                    <p>Subscriber: <strong className="text-slate-100">{modalResult.bill.customer?.name} ({modalResult.bill.customer?.customer_code})</strong></p>
+                    <p>Bill Month: <strong className="text-slate-100">{formatBillMonth(modalResult.bill.bill_month)}</strong></p>
+                    <p>Bill Amount: <strong className="text-emerald-400">৳{formatCurrency(modalResult.bill.amount)}</strong></p>
+                    <p>Advance Credit: <strong className="text-cyan-400">৳{formatCurrency(modalResult.bill.advance || 0)}</strong></p>
+                  </div>
+                ) : null}
                 <button
                   onClick={() => setShowGenerateModal(false)}
                   className="w-full mt-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl"
@@ -979,52 +1106,163 @@ const BillListPage = () => {
             ) : (
               <form onSubmit={handleGenerateSubmit} className="space-y-4 text-xs">
                 {modalError && (
-                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400">
-                    {modalError}
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{modalError}</span>
                   </div>
                 )}
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Target Bill Month *</label>
-                  <input
-                    type="month"
-                    required
-                    value={generateData.bill_month}
-                    onChange={(e) => setGenerateData({ ...generateData, bill_month: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500 font-bold"
-                  />
+                {/* Single Mode Subscriber Search */}
+                {generateMode === 'single' && (
+                  <div className="space-y-2 pb-2">
+                    <label className="block text-slate-300 font-semibold">Search Subscriber *</label>
+                    {!genSelectedCustomer ? (
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={genSearchQuery}
+                          onChange={(e) => setGenSearchQuery(e.target.value)}
+                          placeholder="Search Customer Code (e.g. CCL00001), Name, or Phone..."
+                          className="w-full pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                        />
+                        {genSearching && (
+                          <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin absolute right-3 top-3" />
+                        )}
+
+                        {genSearchResults.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-30 max-h-48 overflow-y-auto divide-y divide-slate-850">
+                            {genSearchResults.map((c) => (
+                              <button
+                                type="button"
+                                key={c.id}
+                                onClick={() => handleSelectGenCustomer(c)}
+                                className="w-full p-2.5 text-left hover:bg-slate-900 transition flex items-center justify-between text-xs"
+                              >
+                                <div>
+                                  <span className="font-bold text-slate-100">{c.name}</span>
+                                  <span className="font-mono text-[10px] ml-2 text-cyan-400">{c.customer_code}</span>
+                                  <div className="text-[10px] text-slate-400">{c.phone} • {c.area?.name}</div>
+                                </div>
+                                <span className="font-bold text-emerald-400">৳{formatCurrency(c.monthly_rent)}/mo</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3 flex items-center justify-between">
+                        <div>
+                          <div className="font-bold text-slate-100 flex items-center gap-1.5">
+                            <span>{genSelectedCustomer.name}</span>
+                            <span className="font-mono text-[10px] text-cyan-400 font-bold">({genSelectedCustomer.customer_code})</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            Rent: ৳{formatCurrency(genSelectedCustomer.monthly_rent)} • {genSelectedCustomer.area?.name}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setGenSelectedCustomer(null)}
+                          className="px-2 py-0.5 text-[11px] text-slate-400 hover:text-rose-400 bg-slate-900 rounded border border-slate-800"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Target Bill Month *</label>
+                    <input
+                      type="month"
+                      required
+                      value={generateData.bill_month}
+                      onChange={(e) => {
+                        const m = e.target.value;
+                        setGenerateData(prev => ({
+                          ...prev,
+                          bill_month: m,
+                          due_date: `${m}-25`,
+                          amount: genSelectedCustomer ? calculateSuggestedRent(genSelectedCustomer, m) : prev.amount,
+                        }));
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500 font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Payment Due Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={generateData.due_date}
+                      onChange={(e) => setGenerateData({ ...generateData, due_date: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Payment Due Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={generateData.due_date}
-                    onChange={(e) => setGenerateData({ ...generateData, due_date: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
+                {generateMode === 'single' && genSelectedCustomer && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Bill Amount (৳) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        value={generateData.amount}
+                        onChange={(e) => setGenerateData({ ...generateData, amount: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-bold focus:outline-none focus:border-cyan-500"
+                      />
+                      {parseFloat(generateData.amount) < parseFloat(genSelectedCustomer.monthly_rent || 0) && (
+                        <p className="text-[10px] text-amber-400 mt-0.5">Prorated based on connection date.</p>
+                      )}
+                    </div>
 
-                <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                  This will generate monthly bills for all <strong className="text-slate-200">Active Subscribers</strong>. Duplicate bills for the same month will be automatically skipped. Any available Advance Credit Balance will be auto-applied.
-                </p>
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳) (Optional)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Auto or Custom..."
+                        value={generateData.previous_dues}
+                        onChange={(e) => setGenerateData({ ...generateData, previous_dues: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {generateMode === 'bulk' && (
+                  <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                    This will generate monthly bills for all <strong className="text-slate-200">Active Subscribers</strong>. Duplicate bills for the same month will be automatically skipped. Any available Advance Credit Balance will be auto-applied.
+                  </p>
+                )}
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setShowGenerateModal(false)}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={modalSubmitting}
-                    className="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5"
+                    disabled={modalSubmitting || (generateMode === 'single' && !genSelectedCustomer)}
+                    className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {modalSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {modalSubmitting ? 'Generating Bills...' : 'Confirm Bulk Generate'}
+                    {modalSubmitting
+                      ? 'Generating Bills...'
+                      : generateMode === 'single'
+                      ? 'Generate Bill for Subscriber'
+                      : 'Confirm Bulk Generate'}
                   </button>
                 </div>
               </form>

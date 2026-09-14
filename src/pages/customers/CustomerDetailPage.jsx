@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../api/axios';
-import { ArrowLeft, User, Phone, MapPin, Tv, ShieldCheck, Receipt, DollarSign, AlertCircle, RefreshCw, Printer, FileText } from 'lucide-react';
+import { ArrowLeft, User, Phone, MapPin, Tv, ShieldCheck, Receipt, DollarSign, AlertCircle, RefreshCw, Printer, FileText, Calendar, CheckCircle2, Loader2, X } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
@@ -16,6 +16,18 @@ const CustomerDetailPage = () => {
     remarks: '',
   });
   const [refundResult, setRefundResult] = useState(null);
+
+  // Single Customer Bill Generation State
+  const [showGenerateBillModal, setShowGenerateBillModal] = useState(false);
+  const [generateBillForm, setGenerateBillForm] = useState({
+    bill_month: new Date().toISOString().slice(0, 7),
+    due_date: new Date(new Date().getFullYear(), new Date().getMonth(), 25).toISOString().split('T')[0],
+    amount: '',
+    previous_dues: '',
+  });
+  const [generatingBill, setGeneratingBill] = useState(false);
+  const [generateBillError, setGenerateBillError] = useState('');
+  const [generateBillSuccess, setGenerateBillSuccess] = useState('');
 
   useEffect(() => {
     fetchCustomerDetails();
@@ -45,6 +57,84 @@ const CustomerDetailPage = () => {
       fetchCustomerDetails();
     } catch (err) {
       alert(err.response?.data?.message || 'Error processing deposit refund');
+    }
+  };
+
+  const calculateSuggestedRent = (monthStr) => {
+    if (!customer) return '0';
+    const rent = parseFloat(customer.monthly_rent || 0);
+    if (!customer.connection_date || !monthStr) return rent.toFixed(2);
+
+    const connStr = customer.connection_date.substring(0, 10);
+    if (connStr.startsWith(monthStr)) {
+      const connDay = parseInt(connStr.split('-')[2], 10);
+      if (connDay >= 11) {
+        const [year, month] = monthStr.split('-').map(Number);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const activeDays = Math.max(1, daysInMonth - connDay + 1);
+        const exact = (rent / daysInMonth) * activeDays;
+        return (Math.ceil(exact / 5) * 5).toFixed(2);
+      }
+    }
+    return rent.toFixed(2);
+  };
+
+  const openGenerateBillModal = () => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const dueDate = `${currentMonth}-25`;
+    const suggested = calculateSuggestedRent(currentMonth);
+
+    setGenerateBillForm({
+      bill_month: currentMonth,
+      due_date: dueDate,
+      amount: suggested,
+      previous_dues: '',
+    });
+    setGenerateBillError('');
+    setGenerateBillSuccess('');
+    setShowGenerateBillModal(true);
+  };
+
+  const handleBillMonthChange = (newMonth) => {
+    const suggested = calculateSuggestedRent(newMonth);
+    setGenerateBillForm(prev => ({
+      ...prev,
+      bill_month: newMonth,
+      due_date: `${newMonth}-25`,
+      amount: suggested,
+    }));
+  };
+
+  const handleGenerateBillSubmit = async (e) => {
+    e.preventDefault();
+    setGeneratingBill(true);
+    setGenerateBillError('');
+    setGenerateBillSuccess('');
+
+    try {
+      const payload = {
+        customer_id: customer.id,
+        bill_month: generateBillForm.bill_month,
+        due_date: generateBillForm.due_date,
+      };
+      if (generateBillForm.amount !== '' && !isNaN(generateBillForm.amount)) {
+        payload.amount = parseFloat(generateBillForm.amount);
+      }
+      if (generateBillForm.previous_dues !== '' && !isNaN(generateBillForm.previous_dues)) {
+        payload.previous_dues = parseFloat(generateBillForm.previous_dues);
+      }
+
+      const res = await api.post('/bills/generate-single', payload);
+      setGenerateBillSuccess(res.data.message || 'Bill generated successfully!');
+      fetchCustomerDetails();
+      setTimeout(() => {
+        setShowGenerateBillModal(false);
+        setGenerateBillSuccess('');
+      }, 1500);
+    } catch (err) {
+      setGenerateBillError(err.response?.data?.message || 'Failed to generate bill for this subscriber.');
+    } finally {
+      setGeneratingBill(false);
     }
   };
 
@@ -196,6 +286,17 @@ const CustomerDetailPage = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {hasRole('super_admin', 'accounts') && customer.status === 'active' && (
+            <button
+              onClick={openGenerateBillModal}
+              className="px-3.5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition"
+              title="Generate Monthly Bill for this subscriber"
+            >
+              <Calendar className="w-4 h-4" />
+              Generate Bill
+            </button>
+          )}
+
           <button
             onClick={() => window.print()}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
@@ -461,6 +562,154 @@ const CustomerDetailPage = () => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Single Customer Bill Generation Modal */}
+      {showGenerateBillModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-cyan-400" />
+                Generate Monthly Bill
+              </h3>
+              <button
+                onClick={() => setShowGenerateBillModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Subscriber Info Card */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-1 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-mono font-bold text-cyan-400">{customer.customer_code}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                  {customer.area?.name} Zone
+                </span>
+              </div>
+              <div className="font-bold text-slate-100 text-sm">{customer.name}</div>
+              <div className="text-slate-400 text-[11px] flex items-center justify-between pt-1 border-t border-slate-850">
+                <span>Rent: <strong className="text-slate-200 font-mono">৳{formatCurrency(customer.monthly_rent)}</strong>/month</span>
+                <span>Connected: <strong className="text-slate-200">{connectionDateFormatted}</strong></span>
+              </div>
+            </div>
+
+            {generateBillSuccess && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                {generateBillSuccess}
+              </div>
+            )}
+
+            {generateBillError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {generateBillError}
+              </div>
+            )}
+
+            <form onSubmit={handleGenerateBillSubmit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Bill Month (YYYY-MM) *</label>
+                  <input
+                    type="month"
+                    required
+                    value={generateBillForm.bill_month}
+                    onChange={(e) => handleBillMonthChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-slate-200 focus:outline-none font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Payment Due Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={generateBillForm.due_date}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, due_date: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-slate-200 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Bill Amount (৳) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={generateBillForm.amount}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, amount: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-emerald-400 font-bold focus:outline-none"
+                  />
+                  {parseFloat(generateBillForm.amount) < parseFloat(customer.monthly_rent || 0) && (
+                    <p className="text-[10px] text-amber-400 mt-1">Prorated based on connection date.</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳) (Optional)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Auto or Custom..."
+                    value={generateBillForm.previous_dues}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, previous_dues: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-rose-400 font-semibold focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Financial Breakdown Preview */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 text-slate-300 text-[11px]">
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Gross Bill Amount:</span>
+                  <span className="text-slate-200 font-bold font-mono">
+                    ৳{formatCurrency(parseFloat(generateBillForm.amount || 0))}
+                  </span>
+                </div>
+                {parseFloat(customer.advance_balance || 0) > 0 && (
+                  <div className="flex justify-between items-center text-cyan-400">
+                    <span>Available Advance Credit:</span>
+                    <span className="font-bold font-mono">
+                      -৳{formatCurrency(Math.min(parseFloat(customer.advance_balance), parseFloat(generateBillForm.amount || 0)))}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center border-t border-slate-800 pt-1 font-bold text-xs text-emerald-400">
+                  <span>Estimated Net Payable:</span>
+                  <span className="font-mono">
+                    ৳{formatCurrency(Math.max(0, parseFloat(generateBillForm.amount || 0) - parseFloat(customer.advance_balance || 0)))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowGenerateBillModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={generatingBill}
+                  className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5 text-xs transition"
+                >
+                  {generatingBill ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+                  {generatingBill ? 'Generating...' : `Generate Bill for ${generateBillForm.bill_month}`}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
