@@ -1131,7 +1131,7 @@ const BillListPage = () => {
                         )}
 
                         {genSearchResults.length > 0 && (
-                          <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-30 max-h-48 overflow-y-auto divide-y divide-slate-850">
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y divide-slate-850">
                             {genSearchResults.map((c) => (
                               <button
                                 type="button"
@@ -1139,12 +1139,27 @@ const BillListPage = () => {
                                 onClick={() => handleSelectGenCustomer(c)}
                                 className="w-full p-2.5 text-left hover:bg-slate-900 transition flex items-center justify-between text-xs"
                               >
-                                <div>
-                                  <span className="font-bold text-slate-100">{c.name}</span>
-                                  <span className="font-mono text-[10px] ml-2 text-cyan-400">{c.customer_code}</span>
-                                  <div className="text-[10px] text-slate-400">{c.phone} • {c.area?.name}</div>
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-100">{c.name}</span>
+                                    <span className="font-mono text-[10px] text-cyan-400 font-semibold">({c.customer_code})</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                    <span>{c.phone}</span>
+                                    <span>•</span>
+                                    <span>{c.area?.name}</span>
+                                    {c.address && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-amber-400/90 flex items-center gap-1 font-medium">
+                                          <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                                          <span className="line-clamp-1">{c.address}</span>
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
-                                <span className="font-bold text-emerald-400">৳{formatCurrency(c.monthly_rent)}/mo</span>
+                                <span className="font-bold text-emerald-400 shrink-0 pl-2">৳{formatCurrency(c.monthly_rent)}/mo</span>
                               </button>
                             ))}
                           </div>
@@ -1152,19 +1167,30 @@ const BillListPage = () => {
                       </div>
                     ) : (
                       <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3 flex items-center justify-between">
-                        <div>
+                        <div className="space-y-1">
                           <div className="font-bold text-slate-100 flex items-center gap-1.5">
                             <span>{genSelectedCustomer.name}</span>
                             <span className="font-mono text-[10px] text-cyan-400 font-bold">({genSelectedCustomer.customer_code})</span>
+                            <span className="text-[9px] uppercase font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded ml-1">
+                              {genSelectedCustomer.area?.name}
+                            </span>
                           </div>
-                          <div className="text-[10px] text-slate-400">
-                            Rent: ৳{formatCurrency(genSelectedCustomer.monthly_rent)} • {genSelectedCustomer.area?.name}
+                          <div className="text-[10px] text-slate-400 flex items-center gap-2">
+                            <span>Phone: <strong className="text-slate-300 font-medium">{genSelectedCustomer.phone}</strong></span>
+                            <span>•</span>
+                            <span>Rent: <strong className="text-slate-200 font-medium">৳{formatCurrency(genSelectedCustomer.monthly_rent)}</strong></span>
                           </div>
+                          {genSelectedCustomer.address && (
+                            <div className="text-[11px] text-amber-400/90 flex items-center gap-1 pt-0.5">
+                              <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                              <span className="font-medium bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{genSelectedCustomer.address}</span>
+                            </div>
+                          )}
                         </div>
                         <button
                           type="button"
                           onClick={() => setGenSelectedCustomer(null)}
-                          className="px-2 py-0.5 text-[11px] text-slate-400 hover:text-rose-400 bg-slate-900 rounded border border-slate-800"
+                          className="px-2 py-1 text-slate-400 hover:text-rose-400 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0 ml-2"
                         >
                           Change
                         </button>

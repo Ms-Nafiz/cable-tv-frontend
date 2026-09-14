@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../api/axios';
-import { Calendar, CheckCircle2, AlertCircle, Info, Calculator, User, Search, Users, Sparkles, Loader2 } from 'lucide-react';
+import { Calendar, CheckCircle2, AlertCircle, Info, Calculator, User, Search, Users, Sparkles, Loader2, MapPin, Phone } from 'lucide-react';
 import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
 const GenerateBillPage = () => {
@@ -245,26 +245,40 @@ const GenerateBillPage = () => {
 
                 {/* Dropdown Results */}
                 {searchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-30 max-h-60 overflow-y-auto divide-y divide-slate-850">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-30 max-h-64 overflow-y-auto divide-y divide-slate-850">
                     {searchResults.map((c) => (
                       <button
                         type="button"
                         key={c.id}
                         onClick={() => handleSelectCustomer(c)}
-                        className="w-full p-3 text-left hover:bg-slate-900/80 transition flex items-center justify-between text-xs"
+                        className="w-full p-3 text-left hover:bg-slate-900/80 transition flex items-center justify-between text-xs group"
                       >
-                        <div>
+                        <div className="space-y-0.5">
                           <div className="font-bold text-slate-100 flex items-center gap-2">
                             <span>{c.name}</span>
                             <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                               {c.customer_code}
                             </span>
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">
-                            {c.phone} • {c.area?.name}
+                          <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                              {c.phone}
+                            </span>
+                            <span>•</span>
+                            <span>{c.area?.name || 'No Zone'}</span>
+                            {c.address && (
+                              <>
+                                <span>•</span>
+                                <span className="text-amber-400/90 flex items-center gap-1 font-medium">
+                                  <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                                  <span className="line-clamp-1">{c.address}</span>
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right shrink-0 pl-3">
                           <div className="font-bold text-emerald-400">৳{formatCurrency(c.monthly_rent)}/mo</div>
                           <div className="text-[10px] text-slate-400 uppercase">{c.connection_type}</div>
                         </div>
@@ -275,19 +289,33 @@ const GenerateBillPage = () => {
               </div>
             ) : (
               /* Selected Subscriber Card */
-              <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
+              <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-bold text-xs text-cyan-400 bg-cyan-500/20 px-2 py-0.5 rounded border border-cyan-500/30">
                       {selectedCustomer.customer_code}
                     </span>
                     <strong className="text-slate-100 text-sm">{selectedCustomer.name}</strong>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                      {selectedCustomer.area?.name} Zone
+                    </span>
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-1">
-                    {selectedCustomer.phone} • {selectedCustomer.area?.name} Zone • Connected: {selectedCustomer.connection_date ? selectedCustomer.connection_date.substring(0, 10) : '-'}
+                  <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <strong className="text-slate-200 font-medium">{selectedCustomer.phone}</strong>
+                    </span>
+                    <span>•</span>
+                    <span>Connected: <strong className="text-slate-200">{selectedCustomer.connection_date ? selectedCustomer.connection_date.substring(0, 10) : '-'}</strong></span>
                   </div>
+                  {selectedCustomer.address && (
+                    <div className="text-xs text-amber-400/90 flex items-center gap-1.5 pt-0.5">
+                      <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="font-medium bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">{selectedCustomer.address}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
                   <div className="text-right">
                     <div className="text-[10px] text-slate-400">Standard Rent</div>
                     <div className="font-bold text-slate-100 text-xs">৳{formatCurrency(selectedCustomer.monthly_rent)}</div>

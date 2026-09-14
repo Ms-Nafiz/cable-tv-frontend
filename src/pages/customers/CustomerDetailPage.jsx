@@ -281,7 +281,27 @@ const CustomerDetailPage = () => {
                 {customer.customer_code}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">{customer.area?.name} Zone</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 mt-1">
+              <span>{customer.area?.name} Zone</span>
+              {customer.phone && (
+                <>
+                  <span>•</span>
+                  <span className="flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    {customer.phone}
+                  </span>
+                </>
+              )}
+              {customer.address && (
+                <>
+                  <span>•</span>
+                  <span className="flex items-center gap-1 text-amber-400 font-medium">
+                    <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    {customer.address}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -584,7 +604,7 @@ const CustomerDetailPage = () => {
             </div>
 
             {/* Subscriber Info Card */}
-            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-1 text-xs">
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-1.5 text-xs">
               <div className="flex justify-between items-center">
                 <span className="font-mono font-bold text-cyan-400">{customer.customer_code}</span>
                 <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
@@ -592,7 +612,21 @@ const CustomerDetailPage = () => {
                 </span>
               </div>
               <div className="font-bold text-slate-100 text-sm">{customer.name}</div>
-              <div className="text-slate-400 text-[11px] flex items-center justify-between pt-1 border-t border-slate-850">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-400 text-[11px]">
+                {customer.phone && (
+                  <span className="flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                    <span>{customer.phone}</span>
+                  </span>
+                )}
+                {customer.address && (
+                  <span className="flex items-center gap-1 text-amber-400/90 font-medium">
+                    <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span>{customer.address}</span>
+                  </span>
+                )}
+              </div>
+              <div className="text-slate-400 text-[11px] flex items-center justify-between pt-1.5 border-t border-slate-850">
                 <span>Rent: <strong className="text-slate-200 font-mono">৳{formatCurrency(customer.monthly_rent)}</strong>/month</span>
                 <span>Connected: <strong className="text-slate-200">{connectionDateFormatted}</strong></span>
               </div>
