@@ -1,13 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { UserCheck, Plus, UserPlus, Trash2, MapPin, Edit3 } from 'lucide-react';
 
 const UserManagementPage = () => {
-  const [users, setUsers] = useState([]);
-  const [areas, setAreas] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+
+  const { data: users = [], isLoading: usersLoading } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => (await api.get('/users')).data,
+  });
+
+  const { data: areas = [], isLoading: areasLoading } = useQuery({
+    queryKey: ['areas'],
+    queryFn: async () => (await api.get('/areas')).data,
+  });
+
+  const loading = usersLoading || areasLoading;
 
   const [formData, setFormData] = useState({
     name: '',
@@ -18,26 +29,6 @@ const UserManagementPage = () => {
     area_id: '',
     status: 'active',
   });
-
-  useEffect(() => {
-    fetchUsersAndAreas();
-  }, []);
-
-  const fetchUsersAndAreas = async () => {
-    setLoading(true);
-    try {
-      const [uRes, aRes] = await Promise.all([
-        api.get('/users'),
-        api.get('/areas'),
-      ]);
-      setUsers(uRes.data);
-      setAreas(aRes.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleOpenModal = (user = null) => {
     if (user) {
@@ -75,7 +66,7 @@ const UserManagementPage = () => {
         await api.post('/users', formData);
       }
       setShowModal(false);
-      fetchUsersAndAreas();
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to save user');
     }
@@ -85,7 +76,7 @@ const UserManagementPage = () => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
       await api.delete(`/users/${id}`);
-      fetchUsersAndAreas();
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (e) {
       alert(e.response?.data?.message || 'Error deleting user');
     }

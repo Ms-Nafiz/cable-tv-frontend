@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../../api/axios';
+import { useQuery } from '@tanstack/react-query';
 import { DollarSign, Receipt, Printer, Calendar } from 'lucide-react';
 import ReceiptModal from '../../components/ReceiptModal';
 import Pagination from '../../components/Pagination';
 
 const MyCollectionsPage = () => {
-  const [payments, setPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [dateFilter, setDateFilter] = useState('');
 
@@ -14,24 +13,19 @@ const MyCollectionsPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 15;
 
-  useEffect(() => {
-    fetchCollections();
-  }, [dateFilter]);
-
-  const fetchCollections = async () => {
-    setLoading(true);
-    try {
+  const { data: payments = [], isLoading: loading } = useQuery({
+    queryKey: ['my-collections', dateFilter],
+    queryFn: async () => {
       const params = {};
       if (dateFilter) params.date = dateFilter;
       const res = await api.get('/payments', { params });
-      setPayments(res.data);
-      setCurrentPage(1);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return res.data;
+    },
+  });
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateFilter]);
 
   const totalAmount = payments.reduce((acc, p) => acc + parseFloat(p.amount_paid), 0);
 

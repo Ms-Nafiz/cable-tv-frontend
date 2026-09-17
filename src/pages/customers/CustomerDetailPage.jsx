@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, User, Phone, MapPin, Tv, ShieldCheck, Receipt, DollarSign, AlertCircle, RefreshCw, Printer, FileText, Calendar, CheckCircle2, Loader2, X } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { formatCurrency, formatBillMonth } from '../../utils/formatters';
@@ -8,8 +9,14 @@ import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 const CustomerDetailPage = () => {
   const { id } = useParams();
   const { hasRole } = useAuth();
-  const [customer, setCustomer] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  const { data: customer, isLoading: loading } = useQuery({
+    queryKey: ['customer', id],
+    queryFn: async () => (await api.get(`/customers/${id}`)).data,
+    enabled: !!id,
+  });
+
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [refundData, setRefundData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -29,22 +36,6 @@ const CustomerDetailPage = () => {
   const [generateBillError, setGenerateBillError] = useState('');
   const [generateBillSuccess, setGenerateBillSuccess] = useState('');
 
-  useEffect(() => {
-    fetchCustomerDetails();
-  }, [id]);
-
-  const fetchCustomerDetails = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get(`/customers/${id}`);
-      setCustomer(res.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRefundSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -54,7 +45,9 @@ const CustomerDetailPage = () => {
         remarks: refundData.remarks,
       });
       setRefundResult(res.data);
-      fetchCustomerDetails();
+      queryClient.invalidateQueries({ queryKey: ['customer', id] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       alert(err.response?.data?.message || 'Error processing deposit refund');
     }
@@ -88,7 +81,10 @@ const CustomerDetailPage = () => {
       bill_month: currentMonth,
       due_date: dueDate,
       amount: suggested,
-      previous_dues: '',
+      previous_dues: customer.dues ? customer.dues : '',
+      advance: (parseFloat(customer.advance_balance || customer.advance || 0) > 0) ? (customer.advance_balance || customer.advance) : '',
+      adjustment: '',
+      adjustment_type: 'Debit',
     });
     setGenerateBillError('');
     setGenerateBillSuccess('');
@@ -123,10 +119,20 @@ const CustomerDetailPage = () => {
       if (generateBillForm.previous_dues !== '' && !isNaN(generateBillForm.previous_dues)) {
         payload.previous_dues = parseFloat(generateBillForm.previous_dues);
       }
+      if (generateBillForm.advance !== '' && !isNaN(generateBillForm.advance)) {
+        payload.advance = parseFloat(generateBillForm.advance);
+      }
+      if (generateBillForm.adjustment !== '' && !isNaN(generateBillForm.adjustment)) {
+        payload.adjustment = parseFloat(generateBillForm.adjustment);
+        payload.adjustment_type = generateBillForm.adjustment_type || 'Debit';
+      }
 
       const res = await api.post('/bills/generate-single', payload);
       setGenerateBillSuccess(res.data.message || 'Bill generated successfully!');
-      fetchCustomerDetails();
+      queryClient.invalidateQueries({ queryKey: ['customer', id] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setTimeout(() => {
         setShowGenerateBillModal(false);
         setGenerateBillSuccess('');
@@ -163,14 +169,13 @@ const CustomerDetailPage = () => {
     const rawDate = b.generated_at || b.created_at;
     const formattedTxDate = rawDate ? new Date(rawDate).toLocaleDateString('en-GB') : b.bill_month;
     const formattedDueDate = b.due_date ? new Date(b.due_date).toLocaleDateString('en-GB') : b.bill_month;
-    const drAmount = parseFloat(b.amount || 0);
+    const rent = parseFloat(b.amount || 0);
+    const adj = parseFloat(b.adjustment || 0);
+    const adjType = b.adjustment_type;
     const formattedBillMonth = formatBillMonth(b.bill_month);
-    const advanceAdj = parseFloat(b.advance || 0);
-    const notesDetail = advanceAdj > 0
-      ? `Monthly Cable TV Bill (${formattedBillMonth}) [Advance Adjusted: ৳${formatCurrency(advanceAdj)}]`
-      : `Monthly Cable TV Bill (${formattedBillMonth})`;
     const createdTime = rawDate ? new Date(rawDate).getTime() : new Date(b.bill_month + '-01').getTime();
 
+    // Bill row represents the periodic monthly charge (DR)
     ledgerEvents.push({
       id: `bill-${b.id}`,
       sortKey: `${b.bill_month}_1_${createdTime}_${b.id}`,
@@ -178,11 +183,28 @@ const CustomerDetailPage = () => {
       docType: 'Bill',
       docNo: formattedBillMonth,
       date: formattedDueDate,
-      notes: notesDetail,
-      dr: drAmount,
+      notes: `Monthly Bill (${formattedBillMonth}) [Rent: ৳${formatCurrency(rent)}]`,
+      dr: rent,
       cr: 0,
       timestamp: createdTime,
     });
+
+    // If bill has an adjustment, add a distinct Adjustment event
+    if (adj > 0 && adjType) {
+      const isDebit = adjType.toLowerCase() === 'debit';
+      ledgerEvents.push({
+        id: `adj-${b.id}`,
+        sortKey: `${b.bill_month}_1b_${createdTime}_${b.id}`,
+        txDate: formattedTxDate,
+        docType: 'Adjustment',
+        docNo: formattedBillMonth,
+        date: formattedDueDate,
+        notes: `Bill Adjustment (${isDebit ? 'Debit' : 'Credit'}) for ${formattedBillMonth}`,
+        dr: isDebit ? adj : 0,
+        cr: !isDebit ? adj : 0,
+        timestamp: createdTime + 1,
+      });
+    }
   });
 
   // 2. Group Payments by Master Receipt Number as Cr (Credit) events
@@ -367,11 +389,19 @@ const CustomerDetailPage = () => {
           </div>
         </div>
 
-        {parseFloat(customer.advance_balance || 0) > 0 && (
+        {parseFloat(customer.advance_balance || customer.advance || 0) > 0 && (
           <div className="bg-slate-900 border border-emerald-500/30 p-5 rounded-2xl space-y-1 col-span-full sm:col-span-1">
             <div className="text-xs text-emerald-400 font-medium">Advance Credit Balance</div>
-            <div className="text-lg font-bold text-emerald-400">৳{parseFloat(customer.advance_balance).toFixed(2)}</div>
+            <div className="text-lg font-bold text-emerald-400">৳{parseFloat(customer.advance_balance || customer.advance).toFixed(2)}</div>
             <div className="text-[11px] text-emerald-300">Auto-adjusts next bills</div>
+          </div>
+        )}
+
+        {parseFloat(customer.dues || 0) > 0 && (
+          <div className="bg-slate-900 border border-amber-500/30 p-5 rounded-2xl space-y-1 col-span-full sm:col-span-1">
+            <div className="text-xs text-amber-400 font-medium">Standing / Opening Dues</div>
+            <div className="text-lg font-bold text-amber-400">৳{parseFloat(customer.dues).toFixed(2)}</div>
+            <div className="text-[11px] text-amber-300">Carries into next bill</div>
           </div>
         )}
       </div>
@@ -417,6 +447,8 @@ const CustomerDetailPage = () => {
                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
                         row.docType === 'Bill'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          : row.docType === 'Adjustment'
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                           : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       }`}>
                         {row.docType}
@@ -426,15 +458,15 @@ const CustomerDetailPage = () => {
                     <td className="py-3 px-3 text-slate-400 font-sans">{row.date}</td>
                     <td className="py-3 px-3 text-slate-300 font-sans text-[11px] max-w-xs">{row.notes}</td>
                     <td className="py-3 px-3 text-right font-bold text-slate-200">
-                      {row.dr > 0 ? `৳${row.dr.toFixed(2)}` : <span className="text-slate-600 font-sans">-</span>}
+                      {row.dr > 0 ? `৳${formatCurrency(row.dr)}` : <span className="text-slate-600 font-sans">-</span>}
                     </td>
                     <td className="py-3 px-3 text-right font-bold text-emerald-400">
-                      {row.cr > 0 ? `৳${row.cr.toFixed(2)}` : <span className="text-slate-600 font-sans">-</span>}
+                      {row.cr > 0 ? `৳${formatCurrency(row.cr)}` : <span className="text-slate-600 font-sans">-</span>}
                     </td>
                     <td className="py-3 px-3 text-right font-bold text-slate-100">
                       {row.balance >= 0
-                        ? `${row.balance.toFixed(2)} Dr`
-                        : `${Math.abs(row.balance).toFixed(2)} Cr`}
+                        ? `${formatCurrency(row.balance)} Dr`
+                        : `${formatCurrency(Math.abs(row.balance))} Cr`}
                     </td>
                   </tr>
                 ))
@@ -447,12 +479,12 @@ const CustomerDetailPage = () => {
                   <td colSpan="5" className="py-3.5 px-3 uppercase text-slate-400 text-right font-sans">
                     Statement Totals:
                   </td>
-                  <td className="py-3.5 px-3 text-right text-slate-100 font-mono">৳{totalDr.toFixed(2)}</td>
-                  <td className="py-3.5 px-3 text-right text-emerald-400 font-mono">৳{totalCr.toFixed(2)}</td>
+                  <td className="py-3.5 px-3 text-right text-slate-100 font-mono">৳{formatCurrency(totalDr)}</td>
+                  <td className="py-3.5 px-3 text-right text-emerald-400 font-mono">৳{formatCurrency(totalCr)}</td>
                   <td className="py-3.5 px-3 text-right text-cyan-400 font-mono">
                     {runningBalance >= 0
-                      ? `${runningBalance.toFixed(2)} Dr`
-                      : `${Math.abs(runningBalance).toFixed(2)} Cr`}
+                      ? `${formatCurrency(runningBalance)} Dr`
+                      : `${formatCurrency(Math.abs(runningBalance))} Cr`}
                   </td>
                 </tr>
               </tfoot>
@@ -673,7 +705,7 @@ const CustomerDetailPage = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Bill Amount (৳) *</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Monthly Rent / Bill (৳) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -689,7 +721,7 @@ const CustomerDetailPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳) (Optional)</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -702,29 +734,88 @@ const CustomerDetailPage = () => {
                 </div>
               </div>
 
-              {/* Financial Breakdown Preview */}
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 text-slate-300 text-[11px]">
-                <div className="flex justify-between items-center text-slate-400">
-                  <span>Gross Bill Amount:</span>
-                  <span className="text-slate-200 font-bold font-mono">
-                    ৳{formatCurrency(parseFloat(generateBillForm.amount || 0))}
-                  </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Advance to Adjust (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={generateBillForm.advance}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, advance: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-cyan-400 font-semibold focus:outline-none"
+                  />
                 </div>
-                {parseFloat(customer.advance_balance || 0) > 0 && (
-                  <div className="flex justify-between items-center text-cyan-400">
-                    <span>Available Advance Credit:</span>
-                    <span className="font-bold font-mono">
-                      -৳{formatCurrency(Math.min(parseFloat(customer.advance_balance), parseFloat(generateBillForm.amount || 0)))}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center border-t border-slate-800 pt-1 font-bold text-xs text-emerald-400">
-                  <span>Estimated Net Payable:</span>
-                  <span className="font-mono">
-                    ৳{formatCurrency(Math.max(0, parseFloat(generateBillForm.amount || 0) - parseFloat(customer.advance_balance || 0)))}
-                  </span>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Adjustment (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={generateBillForm.adjustment}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, adjustment: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-amber-400 font-semibold focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Adjustment Type</label>
+                  <select
+                    value={generateBillForm.adjustment_type}
+                    onChange={(e) => setGenerateBillForm({ ...generateBillForm, adjustment_type: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl text-xs text-slate-200 focus:outline-none font-semibold"
+                  >
+                    <option value="Debit">Debit (+)</option>
+                    <option value="Credit">Credit (-)</option>
+                  </select>
                 </div>
               </div>
+
+              {/* Financial Breakdown Preview */}
+              {(() => {
+                const rentVal = parseFloat(generateBillForm.amount || 0);
+                const duesVal = parseFloat(generateBillForm.previous_dues || 0);
+                const advVal = parseFloat(generateBillForm.advance || 0);
+                const adjVal = parseFloat(generateBillForm.adjustment || 0);
+                const adjSign = generateBillForm.adjustment_type === 'Debit' ? adjVal : -adjVal;
+                const estimatedTotal = Math.max(0, (rentVal + duesVal - advVal) + adjSign);
+
+                return (
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 text-slate-300 text-[11px]">
+                    <div className="flex justify-between items-center text-slate-400">
+                      <span>Monthly Rent:</span>
+                      <span className="text-slate-200 font-bold font-mono">৳{formatCurrency(rentVal)}</span>
+                    </div>
+                    {duesVal > 0 && (
+                      <div className="flex justify-between items-center text-rose-400">
+                        <span>Previous Dues:</span>
+                        <span className="font-bold font-mono">+৳{formatCurrency(duesVal)}</span>
+                      </div>
+                    )}
+                    {advVal > 0 && (
+                      <div className="flex justify-between items-center text-cyan-400">
+                        <span>Advance Deduction:</span>
+                        <span className="font-bold font-mono">-৳{formatCurrency(advVal)}</span>
+                      </div>
+                    )}
+                    {adjVal > 0 && (
+                      <div className="flex justify-between items-center text-amber-400">
+                        <span>Adjustment ({generateBillForm.adjustment_type}):</span>
+                        <span className="font-bold font-mono">
+                          {generateBillForm.adjustment_type === 'Debit' ? '+' : '-'}৳{formatCurrency(adjVal)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center border-t border-slate-800 pt-1 font-bold text-xs text-emerald-400">
+                      <span>Total Payable: (Rent + Dues - Adv ± Adj)</span>
+                      <span className="font-mono">৳{formatCurrency(estimatedTotal)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="flex justify-end gap-2 pt-1">
                 <button

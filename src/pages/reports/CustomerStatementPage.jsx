@@ -87,14 +87,14 @@ const CustomerStatementPage = () => {
       const rawDate = b.generated_at || b.created_at;
       const formattedTxDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : b.bill_month + '-01';
       const formattedDueDate = b.due_date ? new Date(b.due_date).toISOString().split('T')[0] : b.bill_month + '-25';
-      const drAmount = parseFloat(b.amount || 0);
+
+      const rent = parseFloat(b.amount || 0);
+      const adj = parseFloat(b.adjustment || 0);
+      const adjType = b.adjustment_type;
       const formattedBillMonth = formatBillMonth(b.bill_month);
-      const advanceAdj = parseFloat(b.advance || 0);
-      const notesDetail = advanceAdj > 0
-        ? `Monthly Cable TV Bill (${formattedBillMonth}) [Advance Adjusted: ৳${formatCurrency(advanceAdj)}]`
-        : `Monthly Cable TV Bill (${formattedBillMonth})`;
       const createdTime = rawDate ? new Date(rawDate).getTime() : new Date(b.bill_month + '-01').getTime();
 
+      // Bill row represents the periodic monthly charge (DR)
       allEvents.push({
         id: `bill-${b.id}`,
         sortKey: `${b.bill_month}_1_${createdTime}_${b.id}`,
@@ -102,11 +102,28 @@ const CustomerStatementPage = () => {
         docType: 'Bill',
         docNo: formattedBillMonth,
         date: formattedDueDate,
-        notes: notesDetail,
-        dr: drAmount,
+        notes: `Monthly Bill (${formattedBillMonth}) [Rent: ৳${formatCurrency(rent)}]`,
+        dr: rent,
         cr: 0,
         timestamp: createdTime,
       });
+
+      // If bill has an adjustment, add a distinct Adjustment event
+      if (adj > 0 && adjType) {
+        const isDebit = adjType.toLowerCase() === 'debit';
+        allEvents.push({
+          id: `adj-${b.id}`,
+          sortKey: `${b.bill_month}_1b_${createdTime}_${b.id}`,
+          txDate: formattedTxDate,
+          docType: 'Adjustment',
+          docNo: formattedBillMonth,
+          date: formattedDueDate,
+          notes: `Bill Adjustment (${isDebit ? 'Debit' : 'Credit'}) for ${formattedBillMonth}`,
+          dr: isDebit ? adj : 0,
+          cr: !isDebit ? adj : 0,
+          timestamp: createdTime + 1,
+        });
+      }
     });
 
     // 2. Group Payments by Master Receipt Number as Cr (Credit) events
@@ -354,9 +371,17 @@ const CustomerStatementPage = () => {
                 <div className="text-[11px] text-slate-400">Security Deposit</div>
                 <div className="text-sm font-bold text-emerald-400">৳{formatCurrency(selectedCustomer.current_deposit)}</div>
               </div>
+              {parseFloat(selectedCustomer.advance_balance || 0) > 0 && (
+                <div>
+                  <div className="text-[11px] text-emerald-400 font-medium">Advance Credit</div>
+                  <div className="text-sm font-bold text-emerald-400">৳{formatCurrency(selectedCustomer.advance_balance)}</div>
+                </div>
+              )}
               <div>
                 <div className="text-[11px] text-slate-400">Current Net Due</div>
-                <div className="text-sm font-bold text-rose-400">৳{formatCurrency(selectedCustomer.total_due)}</div>
+                <div className={`text-sm font-bold ${parseFloat(selectedCustomer.total_due || 0) > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  ৳{formatCurrency(selectedCustomer.total_due)}
+                </div>
               </div>
             </div>
           </div>
@@ -404,6 +429,8 @@ const CustomerStatementPage = () => {
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
                             row.docType === 'Bill'
                               ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : row.docType === 'Adjustment'
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                               : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                           }`}>
                             {row.docType}

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQuery } from '@tanstack/react-query';
 import { 
   Users, 
   Tv, 
@@ -8,49 +9,30 @@ import {
   AlertCircle, 
   Calendar, 
   UserPlus, 
-  FileText,
-  TrendingUp,
-  Receipt
+  FileText, 
+  TrendingUp, 
+  Receipt 
 } from 'lucide-react';
 
 const DashboardPage = () => {
-  const [stats, setStats] = useState({
-    totalCustomers: 0,
-    activeAnalog: 0,
-    activeDigital: 0,
-    totalCollected: 0,
-    totalDueAmount: 0,
-    totalDueCount: 0,
-  });
-  const [recentPayments, setRecentPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    try {
+  const { data: dashboardData, isLoading: loading } = useQuery({
+    queryKey: ['dashboard', 'summary'],
+    queryFn: async () => {
       const res = await api.get('/dashboard/summary');
-      const data = res.data;
+      return res.data;
+    },
+  });
 
-      setStats({
-        totalCustomers: data.totalCustomers || 0,
-        activeAnalog: data.activeAnalog || 0,
-        activeDigital: data.activeDigital || 0,
-        totalCollected: data.totalCollected || 0,
-        totalDueAmount: data.totalDueAmount || 0,
-        totalDueCount: data.totalDueCount || 0,
-      });
-
-      setRecentPayments(data.recentPayments || []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  const stats = {
+    totalCustomers: dashboardData?.totalCustomers || 0,
+    activeAnalog: dashboardData?.activeAnalog || 0,
+    activeDigital: dashboardData?.activeDigital || 0,
+    totalCollected: dashboardData?.totalCollected || 0,
+    totalDueAmount: dashboardData?.totalDueAmount || 0,
+    totalDueCount: dashboardData?.totalDueCount || 0,
   };
+
+  const recentPayments = dashboardData?.recentPayments || [];
 
   if (loading) {
     return (

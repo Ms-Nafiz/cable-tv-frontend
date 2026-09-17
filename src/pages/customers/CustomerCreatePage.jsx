@@ -1,12 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, UserPlus, Tv, ShieldCheck } from 'lucide-react';
 
 const CustomerCreatePage = () => {
   const navigate = useNavigate();
-  const [areas, setAreas] = useState([]);
-  const [collectors, setCollectors] = useState([]);
+  const queryClient = useQueryClient();
+
+  const { data: areas = [] } = useQuery({
+    queryKey: ['areas'],
+    queryFn: async () => (await api.get('/areas')).data,
+  });
+
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => (await api.get('/users')).data,
+  });
+
+  const collectors = users.filter((u) => u.role === 'collector');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -17,33 +29,27 @@ const CustomerCreatePage = () => {
     stb_serial: '',
     monthly_rent: '500',
     deposit_amount: '500',
+    dues: '0',
+    advance: '0',
     connection_date: new Date().toISOString().split('T')[0],
     assigned_collector_id: '',
   });
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  // Set default area & collector once available
+  useEffect(() => {
+    if (areas.length > 0 && !formData.area_id) {
+      setFormData((prev) => ({ ...prev, area_id: areas[0].id }));
+    }
+  }, [areas]);
 
   useEffect(() => {
-    fetchFormOptions();
-  }, []);
-
-  const fetchFormOptions = async () => {
-    try {
-      const [areaRes, userRes] = await Promise.all([
-        api.get('/areas'),
-        api.get('/users'),
-      ]);
-      setAreas(areaRes.data);
-      if (areaRes.data.length > 0) {
-        setFormData(prev => ({ ...prev, area_id: areaRes.data[0].id }));
-      }
-      const collectorList = userRes.data.filter(u => u.role === 'collector');
-      setCollectors(collectorList);
-    } catch (e) {
-      console.error(e);
+    if (collectors.length > 0 && !formData.assigned_collector_id) {
+      setFormData((prev) => ({ ...prev, assigned_collector_id: collectors[0].id }));
     }
-  };
+  }, [collectors]);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleConnectionTypeChange = (type) => {
     setFormData(prev => ({
@@ -61,6 +67,8 @@ const CustomerCreatePage = () => {
 
     try {
       await api.post('/customers', formData);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       navigate('/customers');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create customer');
@@ -228,6 +236,32 @@ const CustomerCreatePage = () => {
               value={formData.deposit_amount}
               onChange={(e) => setFormData({ ...formData, deposit_amount: e.target.value })}
               className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Opening Dues (পূর্বের বকেয়া) (৳)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.dues}
+              onChange={(e) => setFormData({ ...formData, dues: e.target.value })}
+              placeholder="0.00"
+              className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Advance Balance (অগ্রিম জমা) (৳)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.advance}
+              onChange={(e) => setFormData({ ...formData, advance: e.target.value })}
+              placeholder="0.00"
+              className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-cyan-400 font-semibold focus:outline-none focus:border-cyan-500"
             />
           </div>
 

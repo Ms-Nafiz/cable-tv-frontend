@@ -1,29 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Plus, Trash2, Edit3, Users } from 'lucide-react';
 
 const AreaManagementPage = () => {
-  const [areas, setAreas] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editingArea, setEditingArea] = useState(null);
   const [name, setName] = useState('');
 
-  useEffect(() => {
-    fetchAreas();
-  }, []);
-
-  const fetchAreas = async () => {
-    setLoading(true);
-    try {
+  const { data: areas = [], isLoading: loading } = useQuery({
+    queryKey: ['areas'],
+    queryFn: async () => {
       const res = await api.get('/areas');
-      setAreas(res.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return res.data;
+    },
+  });
 
   const handleOpenModal = (area = null) => {
     if (area) {
@@ -45,7 +37,7 @@ const AreaManagementPage = () => {
         await api.post('/areas', { name });
       }
       setShowModal(false);
-      fetchAreas();
+      queryClient.invalidateQueries({ queryKey: ['areas'] });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to save area');
     }
@@ -55,7 +47,7 @@ const AreaManagementPage = () => {
     if (!window.confirm('Are you sure you want to delete this zone area?')) return;
     try {
       await api.delete(`/areas/${id}`);
-      fetchAreas();
+      queryClient.invalidateQueries({ queryKey: ['areas'] });
     } catch (e) {
       alert(e.response?.data?.message || 'Error deleting area');
     }

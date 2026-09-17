@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, DollarSign, CheckCircle2, Tv, CreditCard, Wallet, Building2, Banknote, MapPin } from 'lucide-react';
 import ReceiptModal from '../../components/ReceiptModal';
 
@@ -51,6 +52,8 @@ const CollectBillPage = () => {
     }
   };
 
+  const queryClient = useQueryClient();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBillId || !amountPaid) return;
@@ -66,6 +69,11 @@ const CollectBillPage = () => {
       });
 
       setReceiptPayment(res.data);
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['my-collections'] });
+      queryClient.invalidateQueries({ queryKey: ['customer', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       setError(err.response?.data?.message || 'Collection entry failed');
     } finally {

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../api/axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { Calendar, CheckCircle2, AlertCircle, Info, Calculator, User, Search, Users, Sparkles, Loader2, MapPin, Phone } from 'lucide-react';
 import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
 const GenerateBillPage = () => {
+  const queryClient = useQueryClient();
   const currentMonth = new Date().toISOString().slice(0, 7);
   const defaultDueDate = `${currentMonth}-25`;
 
@@ -24,6 +26,9 @@ const GenerateBillPage = () => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [singleAmount, setSingleAmount] = useState('');
   const [singlePreviousDues, setSinglePreviousDues] = useState('');
+  const [singleAdvance, setSingleAdvance] = useState('');
+  const [singleAdjustment, setSingleAdjustment] = useState('');
+  const [singleAdjustmentType, setSingleAdjustmentType] = useState('Debit');
 
   // Live customer search
   useEffect(() => {
@@ -74,6 +79,11 @@ const GenerateBillPage = () => {
     setSearchResults([]);
     const suggested = calculateSuggestedRent(cust, billMonth);
     setSingleAmount(suggested);
+    setSinglePreviousDues(cust.dues ? cust.dues : '');
+    const adv = cust.advance_balance || cust.advance || 0;
+    setSingleAdvance(parseFloat(adv) > 0 ? adv : '');
+    setSingleAdjustment('');
+    setSingleAdjustmentType('Debit');
     setError('');
     setResult(null);
   };
@@ -118,10 +128,20 @@ const GenerateBillPage = () => {
         if (singlePreviousDues !== '' && !isNaN(singlePreviousDues)) {
           payload.previous_dues = parseFloat(singlePreviousDues);
         }
+        if (singleAdvance !== '' && !isNaN(singleAdvance)) {
+          payload.advance = parseFloat(singleAdvance);
+        }
+        if (singleAdjustment !== '' && !isNaN(singleAdjustment)) {
+          payload.adjustment = parseFloat(singleAdjustment);
+          payload.adjustment_type = singleAdjustmentType || 'Debit';
+        }
 
         const res = await api.post('/bills/generate-single', payload);
         setResult(res.data);
       }
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       setError(err.response?.data?.message || 'Bill generation failed');
     } finally {
@@ -357,37 +377,104 @@ const GenerateBillPage = () => {
           </div>
         </div>
 
-        {/* Single Mode Custom Amount & Previous Dues */}
+        {/* Single Mode Custom Amount, Previous Dues, Advance, & Adjustment */}
         {mode === 'single' && selectedCustomer && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Bill Amount (৳) *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                required
-                value={singleAmount}
-                onChange={(e) => setSingleAmount(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-emerald-400 font-bold focus:outline-none focus:border-cyan-500"
-              />
-              {parseFloat(singleAmount) < parseFloat(selectedCustomer.monthly_rent || 0) && (
-                <p className="text-[10px] text-amber-400 mt-1">Suggested prorated bill based on connection date.</p>
-              )}
+          <div className="space-y-4 pt-2 border-t border-slate-800/80">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Monthly Rent / Bill (৳) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={singleAmount}
+                  onChange={(e) => setSingleAmount(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-emerald-400 font-bold focus:outline-none focus:border-cyan-500"
+                />
+                {parseFloat(singleAmount) < parseFloat(selectedCustomer.monthly_rent || 0) && (
+                  <p className="text-[10px] text-amber-400 mt-1">Suggested prorated bill based on connection date.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Previous Dues (৳)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Auto or Custom..."
+                  value={singlePreviousDues}
+                  onChange={(e) => setSinglePreviousDues(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Previous Dues (৳) (Optional)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="Auto or Custom..."
-                value={singlePreviousDues}
-                onChange={(e) => setSinglePreviousDues(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Advance to Deduct (৳)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={singleAdvance}
+                  onChange={(e) => setSingleAdvance(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-cyan-400 font-semibold focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Adjustment (৳)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={singleAdjustment}
+                  onChange={(e) => setSingleAdjustment(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-400 font-semibold focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Adjustment Type</label>
+                <select
+                  value={singleAdjustmentType}
+                  onChange={(e) => setSingleAdjustmentType(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-semibold"
+                >
+                  <option value="Debit">Debit (+)</option>
+                  <option value="Credit">Credit (-)</option>
+                </select>
+              </div>
             </div>
+
+            {/* Live Calculation Preview */}
+            {(() => {
+              const r = parseFloat(singleAmount || 0);
+              const d = parseFloat(singlePreviousDues || 0);
+              const a = parseFloat(singleAdvance || 0);
+              const adj = parseFloat(singleAdjustment || 0);
+              const adjSign = singleAdjustmentType === 'Debit' ? adj : -adj;
+              const estTotal = Math.max(0, (r + d - a) + adjSign);
+
+              return (
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1 text-slate-300 text-xs">
+                  <div className="flex justify-between items-center text-slate-400 text-[11px]">
+                    <span>Formula: (Rent + Dues - Advance ± Adjustment)</span>
+                    <span className="font-mono text-slate-200">
+                      ({formatCurrency(r)} + {formatCurrency(d)} - {formatCurrency(a)}) {singleAdjustmentType === 'Debit' ? '+' : '-'} {formatCurrency(adj)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-800 pt-1.5 font-bold text-sm text-emerald-400">
+                    <span>Estimated Net Payable:</span>
+                    <span className="font-mono">৳{formatCurrency(estTotal)}</span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

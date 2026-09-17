@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, Filter, Plus, Eye, Edit2, Trash2, MapPin, Tv, AlertCircle, X, CheckCircle2, UserPlus, Upload, FileSpreadsheet, Download } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import Pagination from '../../components/Pagination';
@@ -8,10 +9,7 @@ import { formatCurrency } from '../../utils/formatters';
 
 const CustomerListPage = () => {
   const { hasRole } = useAuth();
-  const [customers, setCustomers] = useState([]);
-  const [areas, setAreas] = useState([]);
-  const [collectors, setCollectors] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -32,6 +30,37 @@ const CustomerListPage = () => {
   const [importFile, setImportFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+
+  // Queries
+  const { data: areas = [] } = useQuery({
+    queryKey: ['areas'],
+    queryFn: async () => (await api.get('/areas')).data,
+  });
+
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => (await api.get('/users')).data,
+  });
+
+  const collectors = users.filter((u) => u.role === 'collector');
+
+  const { data: customers = [], isLoading: loading } = useQuery({
+    queryKey: ['customers', { search, areaFilter, statusFilter, typeFilter }],
+    queryFn: async () => {
+      const params = {};
+      if (search) params.search = search;
+      if (areaFilter) params.area_id = areaFilter;
+      if (statusFilter) params.status = statusFilter;
+      if (typeFilter) params.connection_type = typeFilter;
+      const res = await api.get('/customers', { params });
+      return res.data;
+    },
+  });
+
+  // Reset to page 1 on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, areaFilter, statusFilter, typeFilter]);
 
   const handleExportCustomers = async () => {
     try {
@@ -91,7 +120,8 @@ const CustomerListPage = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setImportResult(res.data);
-      fetchCustomers();
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to import customers from Excel');
     } finally {
@@ -114,19 +144,6 @@ const CustomerListPage = () => {
     status: 'active',
   });
 
-  // Fetch initial area options & collectors list on component mount
-  useEffect(() => {
-    fetchAreasAndUsers();
-  }, []);
-
-  // Live reactive auto-filtering when any filter changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchCustomers();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [search, areaFilter, statusFilter, typeFilter]);
-
   const handleResetFilters = () => {
     setSearch('');
     setAreaFilter('');
@@ -134,53 +151,17 @@ const CustomerListPage = () => {
     setTypeFilter('');
   };
 
-  const fetchAreasAndUsers = async () => {
-    try {
-      const [areaRes, userRes] = await Promise.all([
-        api.get('/areas'),
-        api.get('/users'),
-      ]);
-      setAreas(areaRes.data);
-      const collectorList = userRes.data.filter(u => u.role === 'collector');
-      setCollectors(collectorList);
-
-      if (areaRes.data.length > 0 && !formData.area_id) {
-        setFormData(prev => ({ ...prev, area_id: areaRes.data[0].id }));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchCustomers = async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (search) params.search = search;
-      if (areaFilter) params.area_id = areaFilter;
-      if (statusFilter) params.status = statusFilter;
-      if (typeFilter) params.connection_type = typeFilter;
-
-      const res = await api.get('/customers', { params });
-      setCustomers(res.data);
-      setCurrentPage(1);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    fetchCustomers();
+    setCurrentPage(1);
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this customer?')) return;
     try {
       await api.delete(`/customers/${id}`);
-      fetchCustomers();
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (e) {
       alert(e.response?.data?.message || 'Error deleting customer');
     }
@@ -196,6 +177,8 @@ const CustomerListPage = () => {
       stb_serial: '',
       monthly_rent: '500',
       deposit_amount: '500',
+      dues: '0',
+      advance: '0',
       connection_date: new Date().toISOString().split('T')[0],
       assigned_collector_id: collectors.length > 0 ? collectors[0].id : '',
       status: 'active',
@@ -215,6 +198,8 @@ const CustomerListPage = () => {
       stb_serial: c.stb_serial || '',
       monthly_rent: c.monthly_rent || '500',
       deposit_amount: c.deposit_amount || '500',
+      dues: c.dues || '0',
+      advance: c.advance_balance || c.advance || '0',
       connection_date: c.connection_date ? c.connection_date.split('T')[0] : new Date().toISOString().split('T')[0],
       assigned_collector_id: c.assigned_collector_id || '',
       status: c.status || 'active',
@@ -244,7 +229,8 @@ const CustomerListPage = () => {
         await api.post('/customers', formData);
         setShowAddModal(false);
       }
-      fetchCustomers();
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       setModalError(err.response?.data?.message || 'Error saving customer details');
     } finally {
@@ -259,12 +245,9 @@ const CustomerListPage = () => {
   const handleToggleStatus = async (customer) => {
     setTogglingId(customer.id);
     try {
-      const res = await api.patch(`/customers/${customer.id}/toggle-status`);
-      setCustomers((prev) =>
-        prev.map((item) =>
-          item.id === customer.id ? { ...item, status: res.data.customer.status } : item
-        )
-      );
+      await api.patch(`/customers/${customer.id}/toggle-status`);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       console.error(err);
       alert('Failed to toggle customer status');
@@ -669,6 +652,35 @@ const CustomerListPage = () => {
                     value={formData.deposit_amount}
                     onChange={(e) => setFormData({ ...formData, deposit_amount: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 font-bold focus:outline-none focus:border-cyan-500 disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              {/* Dues & Advance */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Opening / Current Dues (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={formData.dues}
+                    onChange={(e) => setFormData({ ...formData, dues: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 font-bold focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Advance Balance (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={formData.advance}
+                    onChange={(e) => setFormData({ ...formData, advance: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-cyan-400 font-bold focus:outline-none focus:border-cyan-500"
                   />
                 </div>
               </div>

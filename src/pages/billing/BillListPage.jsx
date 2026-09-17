@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
 import { Search, Calendar, Filter, Receipt, Eye, X, CheckCircle2, Loader2, Printer, User, Phone, MapPin, Tv, ShieldCheck, AlertCircle, FileText, Download, CreditCard, DollarSign, Upload, FileSpreadsheet, Edit, Trash2, Save, Users } from 'lucide-react';
 import Pagination from '../../components/Pagination';
@@ -7,15 +8,32 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { formatCurrency, formatBillMonth, formatDate } from '../../utils/formatters';
 
 const BillListPage = () => {
-  const [bills, setBills] = useState([]);
-  const [areas, setAreas] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   // Filters
   const [monthFilter, setMonthFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
   const [search, setSearch] = useState('');
+
+  // Queries
+  const { data: areas = [] } = useQuery({
+    queryKey: ['areas'],
+    queryFn: async () => (await api.get('/areas')).data,
+  });
+
+  const { data: bills = [], isLoading: loading } = useQuery({
+    queryKey: ['bills', { monthFilter, statusFilter, areaFilter, search }],
+    queryFn: async () => {
+      const params = {};
+      if (monthFilter) params.bill_month = monthFilter;
+      if (statusFilter) params.status = statusFilter;
+      if (areaFilter) params.area_id = areaFilter;
+      if (search) params.search = search;
+      const res = await api.get('/bills', { params });
+      return res.data;
+    },
+  });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -29,6 +47,9 @@ const BillListPage = () => {
     due_date: new Date(new Date().getFullYear(), new Date().getMonth(), 25).toISOString().split('T')[0],
     amount: '',
     previous_dues: '',
+    advance: '',
+    adjustment: '',
+    adjustment_type: 'Debit',
   });
   const [genSearchQuery, setGenSearchQuery] = useState('');
   const [genSearchResults, setGenSearchResults] = useState([]);
@@ -114,6 +135,9 @@ const BillListPage = () => {
     setEditBillForm({
       amount: bill.amount,
       previous_dues: bill.previous_dues !== undefined && bill.previous_dues !== null ? bill.previous_dues : 0,
+      advance: bill.advance !== undefined && bill.advance !== null ? bill.advance : 0,
+      adjustment: bill.adjustment !== undefined && bill.adjustment !== null ? bill.adjustment : 0,
+      adjustment_type: bill.adjustment_type || 'Debit',
       due_date: bill.due_date ? bill.due_date.split('T')[0] : '',
       status: bill.status || 'unpaid',
     });
@@ -127,7 +151,9 @@ const BillListPage = () => {
       await api.put(`/bills/${editingBill.id}`, editBillForm);
       showAlert('Success', `Bill for ${editingBill.customer?.name} updated successfully!`, 'success');
       setEditingBill(null);
-      fetchBills();
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       console.error(err);
       showAlert('Error', err.response?.data?.message || 'Failed to update bill', 'danger');
@@ -144,7 +170,9 @@ const BillListPage = () => {
         try {
           await api.delete(`/bills/${bill.id}`);
           showAlert('Deleted', `Bill for ${bill.customer?.name} deleted successfully.`, 'success');
-          fetchBills();
+          queryClient.invalidateQueries({ queryKey: ['bills'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          queryClient.invalidateQueries({ queryKey: ['customers'] });
         } catch (err) {
           console.error(err);
           showAlert('Error', err.response?.data?.message || 'Failed to delete bill', 'danger');
@@ -190,7 +218,9 @@ const BillListPage = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPaymentImportResult(res.data);
-      fetchBills();
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to import payments from Excel');
     } finally {
@@ -198,16 +228,9 @@ const BillListPage = () => {
     }
   };
 
+  // Reset to page 1 on filter changes
   useEffect(() => {
-    fetchAreas();
-  }, []);
-
-  // Live Reactive Auto-Filtering when any filter changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchBills();
-    }, 200);
-    return () => clearTimeout(timer);
+    setCurrentPage(1);
   }, [search, monthFilter, statusFilter, areaFilter]);
 
   // Live customer search in generate modal
@@ -256,40 +279,20 @@ const BillListPage = () => {
     setGenSearchQuery('');
     setGenSearchResults([]);
     const suggested = calculateSuggestedRent(cust, generateData.bill_month);
-    setGenerateData(prev => ({ ...prev, amount: suggested }));
-  };
-
-  const fetchAreas = async () => {
-    try {
-      const res = await api.get('/areas');
-      setAreas(res.data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchBills = async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (monthFilter) params.bill_month = monthFilter;
-      if (statusFilter) params.status = statusFilter;
-      if (areaFilter) params.area_id = areaFilter;
-      if (search) params.search = search;
-
-      const res = await api.get('/bills', { params });
-      setBills(res.data);
-      setCurrentPage(1);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    const adv = cust.advance_balance || cust.advance || 0;
+    setGenerateData(prev => ({
+      ...prev,
+      amount: suggested,
+      previous_dues: cust.dues ? cust.dues : '',
+      advance: parseFloat(adv) > 0 ? adv : '',
+      adjustment: '',
+      adjustment_type: 'Debit',
+    }));
   };
 
   const handleFilterSubmit = (e) => {
     e.preventDefault();
-    fetchBills();
+    setCurrentPage(1);
   };
 
   const handleResetFilters = () => {
@@ -352,6 +355,13 @@ const BillListPage = () => {
         if (generateData.previous_dues !== '' && !isNaN(generateData.previous_dues)) {
           payload.previous_dues = parseFloat(generateData.previous_dues);
         }
+        if (generateData.advance !== '' && !isNaN(generateData.advance)) {
+          payload.advance = parseFloat(generateData.advance);
+        }
+        if (generateData.adjustment !== '' && !isNaN(generateData.adjustment)) {
+          payload.adjustment = parseFloat(generateData.adjustment);
+          payload.adjustment_type = generateData.adjustment_type || 'Debit';
+        }
 
         const res = await api.post('/bills/generate-single', payload);
         setModalResult(res.data);
@@ -362,7 +372,9 @@ const BillListPage = () => {
         });
         setModalResult(res.data);
       }
-      fetchBills();
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       setModalError(err.response?.data?.message || 'Failed to generate monthly bills');
     } finally {
@@ -402,7 +414,9 @@ const BillListPage = () => {
 
       const res = await api.post('/payments', payload);
       setPaymentResult(res.data);
-      fetchBills(); // Refresh bill registry
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       setPaymentError(err.response?.data?.message || 'Failed to process bill payment collection.');
     } finally {
@@ -563,9 +577,10 @@ const BillListPage = () => {
               <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 uppercase tracking-wider">
                 <th className="py-3 px-4">Bill Month</th>
                 <th className="py-3 px-4">Subscriber Info</th>
-                <th className="py-3 px-4 text-right">Current Bill</th>
+                <th className="py-3 px-4 text-right">Rent / Bill</th>
                 <th className="py-3 px-4 text-right">Previous Dues</th>
-                <th className="py-3 px-4 text-right">Advance Credit</th>
+                <th className="py-3 px-4 text-right">Advance</th>
+                <th className="py-3 px-4 text-center">Adjustment</th>
                 <th className="py-3 px-4 text-right">Net Payable</th>
                 <th className="py-3 px-4 text-center">Status</th>
                 <th className="py-3 px-4 text-right">Actions</th>
@@ -574,13 +589,13 @@ const BillListPage = () => {
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="py-8 text-center text-cyan-400">
+                  <td colSpan="9" className="py-8 text-center text-cyan-400">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto"></div>
                   </td>
                 </tr>
               ) : paginatedBills.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="py-8 text-center text-slate-500">
+                  <td colSpan="9" className="py-8 text-center text-slate-500">
                     No matching subscriber bills found.
                   </td>
                 </tr>
@@ -614,6 +629,21 @@ const BillListPage = () => {
                     </td>
                     <td className="py-3 px-4 text-right font-semibold text-cyan-400">
                       ৳{formatCurrency(parseFloat(b.advance || 0) + parseFloat(b.advance_credit || 0))}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {parseFloat(b.adjustment || 0) > 0 ? (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            b.adjustment_type === 'Debit'
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          }`}
+                        >
+                          {b.adjustment_type === 'Debit' ? '+' : '-'}৳{formatCurrency(b.adjustment)} ({b.adjustment_type})
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 font-mono">-</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-right font-bold text-emerald-400 text-sm">
                       ৳{formatCurrency(b.net_total_payable !== undefined ? b.net_total_payable : b.due_amount)}
@@ -1232,35 +1262,102 @@ const BillListPage = () => {
                 </div>
 
                 {generateMode === 'single' && genSelectedCustomer && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-300 font-semibold mb-1">Bill Amount (৳) *</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        required
-                        value={generateData.amount}
-                        onChange={(e) => setGenerateData({ ...generateData, amount: e.target.value })}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-bold focus:outline-none focus:border-cyan-500"
-                      />
-                      {parseFloat(generateData.amount) < parseFloat(genSelectedCustomer.monthly_rent || 0) && (
-                        <p className="text-[10px] text-amber-400 mt-0.5">Prorated based on connection date.</p>
-                      )}
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">Monthly Rent / Bill (৳) *</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          required
+                          value={generateData.amount}
+                          onChange={(e) => setGenerateData({ ...generateData, amount: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-bold focus:outline-none focus:border-cyan-500"
+                        />
+                        {parseFloat(generateData.amount) < parseFloat(genSelectedCustomer.monthly_rent || 0) && (
+                          <p className="text-[10px] text-amber-400 mt-0.5">Prorated based on connection date.</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Auto or Custom..."
+                          value={generateData.previous_dues}
+                          onChange={(e) => setGenerateData({ ...generateData, previous_dues: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-300 font-semibold mb-1">Previous Dues (৳) (Optional)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Auto or Custom..."
-                        value={generateData.previous_dues}
-                        onChange={(e) => setGenerateData({ ...generateData, previous_dues: e.target.value })}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 font-semibold focus:outline-none focus:border-cyan-500"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">Advance to Deduct (৳)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={generateData.advance}
+                          onChange={(e) => setGenerateData({ ...generateData, advance: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-cyan-400 font-semibold focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">Adjustment (৳)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={generateData.adjustment}
+                          onChange={(e) => setGenerateData({ ...generateData, adjustment: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-amber-400 font-semibold focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">Adjustment Type</label>
+                        <select
+                          value={generateData.adjustment_type}
+                          onChange={(e) => setGenerateData({ ...generateData, adjustment_type: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500 font-semibold"
+                        >
+                          <option value="Debit">Debit (+)</option>
+                          <option value="Credit">Credit (-)</option>
+                        </select>
+                      </div>
                     </div>
+
+                    {/* Live Calculation Preview */}
+                    {(() => {
+                      const r = parseFloat(generateData.amount || 0);
+                      const d = parseFloat(generateData.previous_dues || 0);
+                      const a = parseFloat(generateData.advance || 0);
+                      const adj = parseFloat(generateData.adjustment || 0);
+                      const adjSign = generateData.adjustment_type === 'Debit' ? adj : -adj;
+                      const estTotal = Math.max(0, (r + d - a) + adjSign);
+
+                      return (
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1 text-slate-300 text-[11px]">
+                          <div className="flex justify-between items-center text-slate-400">
+                            <span>Formula: (Rent + Dues - Advance ± Adjustment)</span>
+                            <span className="font-mono text-slate-200">
+                              ({formatCurrency(r)} + {formatCurrency(d)} - {formatCurrency(a)}) {generateData.adjustment_type === 'Debit' ? '+' : '-'} {formatCurrency(adj)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center border-t border-slate-800 pt-1 font-bold text-xs text-emerald-400">
+                            <span>Estimated Net Payable:</span>
+                            <span className="font-mono">৳{formatCurrency(estTotal)}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -1415,17 +1512,59 @@ const BillListPage = () => {
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1">Previous Dues (পূর্বের বকেয়া) (৳)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={editBillForm.previous_dues}
-                  onChange={(e) => setEditBillForm({ ...editBillForm, previous_dues: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 focus:outline-none focus:border-cyan-500 font-bold"
-                  placeholder="0.00"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Previous Dues (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editBillForm.previous_dues}
+                    onChange={(e) => setEditBillForm({ ...editBillForm, previous_dues: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-rose-400 focus:outline-none focus:border-cyan-500 font-bold"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Advance Deducted (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editBillForm.advance}
+                    onChange={(e) => setEditBillForm({ ...editBillForm, advance: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-cyan-400 focus:outline-none focus:border-cyan-500 font-bold"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Adjustment (৳)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editBillForm.adjustment}
+                    onChange={(e) => setEditBillForm({ ...editBillForm, adjustment: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-amber-400 focus:outline-none focus:border-cyan-500 font-bold"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Adjustment Type</label>
+                  <select
+                    value={editBillForm.adjustment_type || 'Debit'}
+                    onChange={(e) => setEditBillForm({ ...editBillForm, adjustment_type: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-medium"
+                  >
+                    <option value="Debit">Debit (+)</option>
+                    <option value="Credit">Credit (-)</option>
+                  </select>
+                </div>
               </div>
 
               <div>

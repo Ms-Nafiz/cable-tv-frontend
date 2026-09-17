@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { Search, DollarSign, CheckCircle2, AlertTriangle, User, X, Loader2, Banknote, Wallet, Building2, Phone, MapPin, Printer } from 'lucide-react';
 import ReceiptModal from '../../components/ReceiptModal';
 import { formatCurrency, formatBillMonth } from '../../utils/formatters';
 
 const QuickCollectionPage = () => {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -124,6 +126,11 @@ const QuickCollectionPage = () => {
       });
 
       setReceiptPayment(res.data);
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      queryClient.invalidateQueries({ queryKey: ['my-collections'] });
+      queryClient.invalidateQueries({ queryKey: ['customer', selectedCustomer.id] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to record collection.');
     } finally {
